@@ -112,10 +112,18 @@ jobs:
             echo "== $mode: memory (time, RSS KiB, VM total)"; awk 'NR%5==1' out/memory-$mode.txt
             if [ $own = 1 ]; then
               echo "== $mode: log tail"; tail -40 $log
-              grep -E "Bench|dvmc:" $log || true
+              grep -E "Bench|Ops|dvmc:" $log || true
             fi
             echo "crash lines: $(grep -cE "FATAL|CRASH" $log || true)"
           done
+          # compiled code must give what the interpreter gives: every Ops value and Bench checksum the same
+          if [ -n "${{ inputs.dexc }}" ]; then
+            vals() { grep -oE "I/Ops: .*|I/Bench: [a-z-]+: .*checksum -?[0-9]+" "$1" | sed -E 's/: [0-9]+ ms, /: /'; }
+            vals out/interpreted.log > out/values-interpreted.txt; vals out/compiled.log > out/values-compiled.txt
+            echo "values: $(wc -l < out/values-interpreted.txt) interpreted, $(wc -l < out/values-compiled.txt) compiled"
+            if ! diff out/values-interpreted.txt out/values-compiled.txt; then echo "::error::compiled code gave other values"; exit 1; fi
+            [ -s out/values-compiled.txt ] || { echo "::error::no values logged"; exit 1; }
+          fi
 
       # logs and screenshots of the user's apps: locked (packager/lock.sh)
       - name: Lock
