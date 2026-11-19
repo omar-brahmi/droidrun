@@ -569,7 +569,7 @@ class Gen:
             return
         if 0x7b <= op <= 0x8f:
             a, b = v(A4), v(B4)
-            x = {0x7b: f'WI(-RI({b}))', 0x7c: f'WI(~RI({b}))', 0x7d: f'WJ(-RJ({b}))', 0x7e: f'WJ(~RJ({b}))',
+            x = {0x7b: f'WI((int32_t)(0u - (uint32_t)RI({b})))', 0x7c: f'WI(~RI({b}))', 0x7d: f'WJ((int64_t)(0ull - (uint64_t)RJ({b})))', 0x7e: f'WJ(~RJ({b}))',
                  0x7f: f'WF(-RF({b}))', 0x80: f'WD(-RD({b}))', 0x81: f'WJ(RI({b}))', 0x82: f'WF((float)RI({b}))',
                  0x83: f'WD((double)RI({b}))', 0x84: f'WI((int32_t)RJ({b}))', 0x85: f'WF((float)RJ({b}))',
                  0x86: f'WD((double)RJ({b}))', 0x87: f'WI(f2i(RF({b})))', 0x88: f'WJ(f2l(RF({b})))',

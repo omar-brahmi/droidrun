@@ -1995,9 +1995,10 @@ dispatch:;
         normalize(((mref *)dex->mcache[FETCH(1)])->shorty[0], &result);
         NEXT(3);
     }
-    case 0x7b: WI(regs, A4, -RI(regs, B4)); NEXT(1);
+    /* negation in unsigned: -MIN_VALUE is MIN_VALUE in Java, and undefined behaviour in C */
+    case 0x7b: WI(regs, A4, (int32_t)(0u - (uint32_t)RI(regs, B4))); NEXT(1);
     case 0x7c: WI(regs, A4, ~RI(regs, B4)); NEXT(1);
-    case 0x7d: WJ(regs, A4, -RJ(regs, B4)); NEXT(1);
+    case 0x7d: WJ(regs, A4, (int64_t)(0ull - (uint64_t)RJ(regs, B4))); NEXT(1);
     case 0x7e: WJ(regs, A4, ~RJ(regs, B4)); NEXT(1);
     case 0x7f: WF(regs, A4, -RF(regs, B4)); NEXT(1);
     case 0x80: WD(regs, A4, -RD(regs, B4)); NEXT(1);

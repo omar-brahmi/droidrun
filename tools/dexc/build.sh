@@ -11,7 +11,7 @@ case $PLAT in
     *) echo "platform: ios or macos" >&2; exit 1 ;;
 esac
 SYSROOT=$(xcrun --sdk $SDK --show-sdk-path)
-CFLAGS="-target $TARGET -isysroot $SYSROOT -O2 -flto=thin -fPIC -fvisibility=hidden -fno-strict-aliasing -I$R/src/translation-layer-next"
+CFLAGS="-target $TARGET -isysroot $SYSROOT -O2 -fwrapv -flto=thin -fPIC -fvisibility=hidden -fno-strict-aliasing -I$R/src/translation-layer-next"
 mkdir -p "$OUT"
 for d in "$GEN"/*/; do
     [ -f "$d/name" ] || continue
