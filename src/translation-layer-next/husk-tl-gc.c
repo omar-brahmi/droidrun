@@ -33,6 +33,8 @@ void tl_log_line(const char *fmt, ...);
 extern const void *_dyld_get_shared_cache_range(size_t *length) __attribute__((weak_import));   /* dyld, not in its public headers */
 
 #define GC_TAG 250                      /* VM tag of the collector's own memory: never scanned (the registry names every object) */
+#define DATA_TAG 251                    /* memory that holds no pointers (tl_gc_alloc_data): never scanned either */
+#define DATA_MAP_MIN (64u << 10)        /* smaller blocks come from malloc */
 #define EMPTY ((uintptr_t)0)
 #define GONE ((uintptr_t)1)
 
@@ -107,6 +109,19 @@ void tl_gc_before_alloc(void)
 }
 
 /* An object freed elsewhere (tl_jni_unref, before the Java runtime is up). */
+void *tl_gc_alloc_data(size_t bytes)
+{
+    if (bytes < DATA_MAP_MIN) return calloc(1, bytes ? bytes : 1);
+    void *p = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, VM_MAKE_TAG(DATA_TAG), 0);
+    return p == MAP_FAILED ? NULL : p;
+}
+
+void tl_gc_free_data(void *p, size_t bytes)
+{
+    if (!p) return;
+    if (bytes < DATA_MAP_MIN) free(p); else munmap(p, bytes);
+}
+
 void tl_gc_forget(jobj *o)
 {
     if (!o || !g_tab) return;
@@ -274,6 +289,7 @@ static struct {
     run *runs; size_t nruns, caprun;
     size_t next;                                    /* the next run to take, by __atomic_fetch_add */
     bool overflow;                                  /* more runs than room: the collecting thread scans the rest alone */
+    size_t tag_bytes[256];                          /* what the roots were, by VM tag (for the log: what to leave out next) */
 } R;
 
 static void scan_runs(marker *k)
@@ -338,6 +354,7 @@ static void list_runs(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_t 
 static void scan_memory(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_t vecbytes)
 {
     R.nruns = 0; R.next = 0; R.overflow = false;
+    memset(R.tag_bytes, 0, sizeof(R.tag_bytes));
     list_runs(cache_lo, cache_hi, vec, vecbytes);
     pthread_mutex_lock(&W.mu);
     W.finished = 0; W.round++;
@@ -381,7 +398,7 @@ static void list_runs(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_t 
         uintptr_t lo = (uintptr_t)addr, hi = (uintptr_t)(addr + size);
         addr += size;
         if ((info.protection & (VM_PROT_READ | VM_PROT_WRITE)) != (VM_PROT_READ | VM_PROT_WRITE)) continue;
-        if (info.user_tag == GC_TAG) continue;
+        if (info.user_tag == GC_TAG || info.user_tag == DATA_TAG) continue;
         /* shared and aliased memory is scanned too: the loader maps Android libraries' data with vm_remap, and their globals (JNI
            global references, cached strings) are roots. Only device memory is left out. */
         if (info.user_tag == VM_MEMORY_IOKIT || info.user_tag == VM_MEMORY_IOSURFACE || info.user_tag == VM_MEMORY_IOACCELERATOR) continue;
@@ -395,6 +412,7 @@ static void list_runs(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_t 
                 if (!(vec[i] & (MINCORE_INCORE | MINCORE_PAGED_OUT))) { i++; continue; }
                 size_t j = i; while (j < chunk / page && (vec[j] & (MINCORE_INCORE | MINCORE_PAGED_OUT))) j++;
                 add_run(c + i * page, c + j * page);
+                R.tag_bytes[info.user_tag & 255] += (j - i) * page;
                 i = j;
             }
             c += chunk;
@@ -422,6 +440,31 @@ static void free_object(jobj *o)
 
 static pthread_mutex_t g_run = PTHREAD_MUTEX_INITIALIZER;
 
+/* ---- the collector's tables, kept between collections (grown when the heap grows) */
+enum { P_OWN, P_SORT, P_COUNTS, P_OKEY, P_OVAL, P_MARK, P_WORK, P_RUNS, P_STOPPED, P_VEC, P_WORKER, P_COUNT = P_WORKER + GC_WORKERS_MAX };
+static struct { void *p; size_t cap, used; } g_pool[P_COUNT];
+
+static void *pool(int id, size_t bytes)
+{
+    if (g_pool[id].cap < bytes) {
+        if (g_pool[id].p) munmap(g_pool[id].p, g_pool[id].cap);
+        size_t cap = bytes + bytes / 4;                         /* room to grow before mapping again */
+        cap = (cap + 16383) & ~(size_t)16383;
+        g_pool[id].p = gc_map(cap);
+        g_pool[id].cap = g_pool[id].p ? cap : 0;
+    }
+    g_pool[id].used = bytes;
+    return g_pool[id].p;
+}
+
+/* touch every page of the part used: one write per page (zero, where it is still zero) */
+static void prefault(int id)
+{
+    volatile uint8_t *p = g_pool[id].p;
+    if (!p) return;
+    for (size_t o = 0; o < g_pool[id].used; o += 16384) p[o] = p[o];
+}
+
 static void collect(void)
 {
     if (pthread_mutex_trylock(&g_run) != 0) return;            /* another thread is collecting */
@@ -437,22 +480,28 @@ static void collect(void)
     S.ocap = 1; while (S.ocap < g_count * 4 + 1024) S.ocap <<= 1;
     S.capwork = g_count + 1024;
     const size_t vecbytes = 1 << 16;
-    S.own = gc_map(S.capown * sizeof(range));
-    range *sort_tmp = gc_map(S.capown * sizeof(range));
-    size_t *sort_counts = gc_map(65536 * sizeof(size_t));
-    S.okey = gc_map(S.ocap * sizeof(uintptr_t)); S.oval = gc_map(S.ocap * sizeof(uint32_t));
-    S.mark = gc_map(g_cap);
+    /* the tables stay mapped from one collection to the next, and what has to start empty is cleared here, before the world
+     * stops: fresh pages zero-filled on first touch inside the pause cost up to 1.5 s */
+    S.own = pool(P_OWN, S.capown * sizeof(range));
+    range *sort_tmp = pool(P_SORT, S.capown * sizeof(range));
+    size_t *sort_counts = pool(P_COUNTS, 65536 * sizeof(size_t));
+    S.okey = pool(P_OKEY, S.ocap * sizeof(uintptr_t)); S.oval = pool(P_OVAL, S.ocap * sizeof(uint32_t));
+    S.mark = pool(P_MARK, g_cap);
+    if (S.okey) memset(S.okey, 0, S.ocap * sizeof(uintptr_t));
+    if (S.mark) memset(S.mark, 0, g_cap);
     memset(&M0, 0, sizeof(M0));
-    M0.capwork = S.capwork; M0.work = gc_map(M0.capwork * sizeof(uint32_t));
+    M0.capwork = S.capwork; M0.work = pool(P_WORK, M0.capwork * sizeof(uint32_t));
     bool workers_ok = true;
     for (int i = 0; i < W.n; i++) {
         memset(&W.m[i], 0, sizeof(W.m[i]));
-        W.m[i].capwork = S.capwork; W.m[i].work = gc_map(W.m[i].capwork * sizeof(uint32_t));
+        W.m[i].capwork = S.capwork; W.m[i].work = pool(P_WORKER + i, W.m[i].capwork * sizeof(uint32_t));
         workers_ok &= W.m[i].work != NULL;
     }
-    R.caprun = 1 << 20; R.runs = gc_map(R.caprun * sizeof(run));
-    S.capstopped = 8192; S.stopped = gc_map(S.capstopped * sizeof(thread_t));
-    char *vec = gc_map(vecbytes);
+    R.caprun = 1 << 20; R.runs = pool(P_RUNS, R.caprun * sizeof(run));
+    S.capstopped = 8192; S.stopped = pool(P_STOPPED, S.capstopped * sizeof(thread_t));
+    char *vec = pool(P_VEC, vecbytes);
+    /* the pages of the tables this collection uses, made resident now */
+    for (int k = 0; k < P_COUNT; k++) prefault(k);
     size_t cache_len = 0; uintptr_t cache_lo = 0, cache_hi = 0;
     if (_dyld_get_shared_cache_range) { cache_lo = (uintptr_t)_dyld_get_shared_cache_range(&cache_len); cache_hi = cache_lo + cache_len; }
     thread_act_array_t threads = NULL; mach_msg_type_number_t nthreads = 0;
@@ -549,21 +598,19 @@ static void collect(void)
     }
     size_t marked = M0.marked, roots_mb = M0.words * 8 >> 20;
     if (ok) { uint64_t d = (uint64_t)marked * 2; if (d < g_every) d = g_every; if (d > 3000000) d = 3000000; __atomic_store_n(&g_due, d, __ATOMIC_RELAXED); }
-    if (S.own) munmap(S.own, S.capown * sizeof(range));
-    if (S.okey) munmap(S.okey, S.ocap * sizeof(uintptr_t));
-    if (S.oval) munmap(S.oval, S.ocap * sizeof(uint32_t));
-    if (S.mark) munmap(S.mark, g_cap);
-    if (M0.work) munmap(M0.work, M0.capwork * sizeof(uint32_t));
-    for (int i = 0; i < W.n; i++) if (W.m[i].work) { munmap(W.m[i].work, W.m[i].capwork * sizeof(uint32_t)); W.m[i].work = NULL; }
-    if (R.runs) munmap(R.runs, R.caprun * sizeof(run));
-    if (sort_tmp) munmap(sort_tmp, S.capown * sizeof(range));
-    if (sort_counts) munmap(sort_counts, 65536 * sizeof(size_t));
-    if (vec) munmap(vec, vecbytes);
-    if (S.stopped) munmap(S.stopped, S.capstopped * sizeof(thread_t));
+    /* (the tables stay for the next collection) */
     pthread_mutex_unlock(&g_reg);
     pthread_mutex_unlock(&g_run);
     double t1 = now_ms();
     if (!ok) { tl_log_line("gc: could not collect (no memory for its tables, or no thread list)"); return; }
+    {   /* the three largest kinds of root memory */
+        char top[160] = ""; size_t used[3] = { 0 }; int tags[3] = { -1, -1, -1 };
+        for (int k = 0; k < 3; k++)
+            for (int g = 0; g < 256; g++)
+                if (R.tag_bytes[g] > used[k] && g != tags[0] && g != tags[1]) { used[k] = R.tag_bytes[g]; tags[k] = g; }
+        for (int k = 0, o = 0; k < 3 && tags[k] >= 0; k++) o += snprintf(top + o, sizeof(top) - o, "%stag %d %zu MiB", k ? ", " : "", tags[k], used[k] >> 20);
+        tl_log_line("gc: roots by VM tag: %s", top);
+    }
     tl_log_line("gc: %zu threads stopped; %zu objects, %zu live, %zu %s (%zu MiB), %zu MiB of roots scanned by %d threads; "
                 "paused %.0f ms (tables %.0f, roots %.0f, trace %.0f), total %.0f ms",
                 S.nstopped, before, marked, freed, g_mode == 2 ? "freed" : "would be freed", freed_bytes >> 20, roots_mb, W.n + 1,

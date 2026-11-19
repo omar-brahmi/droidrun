@@ -131,6 +131,11 @@ const char *tl_jni_reflected_sig(const jobj *member);        /* a method's or fi
 /* Call a Java method by name from C (HLE-implemented or not), as native code would. */
 jvalue tl_jni_call(jobj *self_or_class, const char *name, const char *sig, const jvalue *args);
 
+/* Memory that never holds a pointer (pixels, sample data): zeroed, and a large block is mapped with a tag the collector's root
+ * scan skips (husk-tl-gc.c). Free it with tl_gc_free_data and the same size. */
+void *tl_gc_alloc_data(size_t bytes);
+void tl_gc_free_data(void *p, size_t bytes);
+
 #ifdef __cplusplus
 }
 #endif

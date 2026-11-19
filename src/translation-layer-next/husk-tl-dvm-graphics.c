@@ -65,10 +65,10 @@ static gbitmap *bm_new(int w, int h)
     if (w <= 0 || h <= 0 || (int64_t)w * h > (1ll << 28)) return NULL;
     gbitmap *b = calloc(1, sizeof(*b));
     b->w = w; b->h = h; b->stride = (size_t)w * 4;
-    b->px = calloc((size_t)h, b->stride);
+    b->px = tl_gc_alloc_data((size_t)h * b->stride);                /* pixels: not scanned for roots by the collector */
     if (!b->px) { free(b); return NULL; }
     b->ctx = CGBitmapContextCreate(b->px, (size_t)w, (size_t)h, 8, b->stride, rgb(), kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
-    if (!b->ctx) { free(b->px); free(b); return NULL; }
+    if (!b->ctx) { tl_gc_free_data(b->px, (size_t)h * b->stride); free(b); return NULL; }
     return b;
 }
 /* libjnigraphics: native code reads and writes a Bitmap's pixels in place (Lottie's and Rive's renderers, image decoders). Husk's
@@ -106,7 +106,7 @@ static void bm_free(gbitmap *b)
 {
     if (!b) return;
     CGContextRelease(b->ctx);
-    free(b->px);
+    tl_gc_free_data(b->px, (size_t)b->h * b->stride);
     free(b);
 }
 static CGImageRef bm_image(gbitmap *b) { return CGBitmapContextCreateImage(b->ctx); }
