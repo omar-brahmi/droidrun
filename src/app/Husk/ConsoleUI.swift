@@ -12,7 +12,7 @@ enum Console {
         Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? dark : light })
     }
 
-    /// The page: Husk's deep navy, or near-white.
+    /// The page: DroidRun's deep navy, or near-white.
     static let page = adaptive(dark: UIColor(red: 0.035, green: 0.047, blue: 0.098, alpha: 1), light: UIColor(white: 0.965, alpha: 1))
     /// Cards and wells on the page.
     static let card = adaptive(dark: UIColor(red: 0.075, green: 0.094, blue: 0.161, alpha: 1), light: UIColor(white: 0.905, alpha: 1))
@@ -95,7 +95,7 @@ extension LibraryItem {
         }
     }
 
-    /// "Last played 2 hours ago", or nothing for what was never opened from Husk.
+    /// "Last played 2 hours ago", or nothing for what was never opened from DroidRun.
     var lastPlayedText: String? {
         guard let date = lastUsed else { return nil }
         let rel = RelativeDateTimeFormatter()
@@ -104,7 +104,7 @@ extension LibraryItem {
         return (isGame ? "Last played " : "Last opened ") + ago
     }
 
-    /// When it was added to Husk, from its folder: what "Recently added" sorts by. Read once per item and kept, since Home
+    /// When it was added to DroidRun, from its folder: what "Recently added" sorts by. Read once per item and kept, since Home
     /// redraws often and a folder's creation date does not change.
     @MainActor var addedDate: Date? {
         if let known = AddedDates.cache[id] { return known }

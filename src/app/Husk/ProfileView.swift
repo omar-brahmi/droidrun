@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// The Husk account: the profile page (avatar, name, @handle, games, apps, playtime, recently played, achievements), sign in, editing.
+// The DroidRun account: the profile page (avatar, name, @handle, games, apps, playtime, recently played, achievements), sign in, editing.
 import SwiftUI
 import UIKit
 
@@ -135,7 +135,7 @@ struct SignInView: View {
         ScrollView {
             VStack(spacing: 18) {
                 HuskMark(size: 72).padding(.top, 24)
-                Text(creating ? "Create a Husk Account" : "Sign In to Husk")
+                Text(creating ? "Create a DroidRun Account" : "Sign In to DroidRun")
                     .font(.system(size: 26, weight: .bold)).foregroundStyle(Console.text)
                 Text("Your profile, playtime and achievements, on this iPhone and on itslevii.dev.")
                     .font(.subheadline).foregroundStyle(Console.textDim).multilineTextAlignment(.center)

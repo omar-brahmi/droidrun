@@ -335,7 +335,7 @@ public class Activity extends ContextThemeWrapper implements Window.Callback, Ke
         if (mFinished) return;
         mFinished = true;
         // the app's last activity going ends the app: say where from, which is often all a log has to explain it
-        if (husk.AppRunner.top() == this && husk.AppRunner.stackSize() == 1) android.util.Log.i("Husk", "the last activity finishes", new Throwable("finish() called from"));
+        if (husk.AppRunner.top() == this && husk.AppRunner.stackSize() == 1) android.util.Log.i("DroidRun", "the last activity finishes", new Throwable("finish() called from"));
         husk.AppRunner.finish(this);
     }
     public void finishAffinity() { husk.AppRunner.finishAffinity(this); }

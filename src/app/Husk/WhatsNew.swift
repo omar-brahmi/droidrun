@@ -22,7 +22,7 @@ enum WhatsNew {
         Item(symbol: "memorychip", title: "Less \"out of memory\"",
              detail: "Fewer thread and address space crashes on sideloaded installs, and Unity games keep their frame rate up. Settings > Performance shows whether Increased Memory Limit and Extended Address Space are on."),
         Item(symbol: "globe", title: "Japanese",
-             detail: "Husk is now in Japanese too, thanks to Yuki-1018."),
+             detail: "DroidRun is now in Japanese too, thanks to Yuki-1018."),
         Item(symbol: "wrench.and.screwdriver.fill", title: "Fixes",
              detail: "Importing a .p12, or launching with one saved, no longer crashes on iOS 27. Remove and Uninstall open next to their buttons on iPad, and Winlator's Settings no longer crashes."),
     ]
@@ -48,7 +48,7 @@ struct WhatsNewSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("What's New in Husk \(WhatsNew.version)").font(.largeTitle.weight(.bold))
+                        Text("What's New in DroidRun \(WhatsNew.version)").font(.largeTitle.weight(.bold))
                     }
                     .padding(.top, 36)
                     ForEach(WhatsNew.items) { item in
@@ -79,9 +79,9 @@ struct WhatsNewSheet: View {
     }
 }
 
-// MARK: - a newer Husk
+// MARK: - a newer DroidRun
 
-/// A newer Husk on GitHub: the releases page is asked at launch (at most twice a day) and the person is told once per release.
+/// A newer DroidRun on GitHub: the releases page is asked at launch (at most twice a day) and the person is told once per release.
 @MainActor
 final class AppUpdates: ObservableObject {
     static let shared = AppUpdates()
@@ -93,7 +93,7 @@ final class AppUpdates: ObservableObject {
 
     @Published var available: Release?
 
-    private static let api = URL(string: "https://api.github.com/repos/Leviidev/Husk/releases/latest")!
+    private static let api = URL(string: "https://api.github.com/repos/omar-brahmi/droidrun/releases/latest")!
     private static let checkedKey = "husk.updates.checked", dismissedKey = "husk.updates.dismissed"
 
     static var current: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0" }
@@ -103,7 +103,7 @@ final class AppUpdates: ObservableObject {
         if Date().timeIntervalSince1970 - d.double(forKey: Self.checkedKey) < 12 * 3600 { return }
         var req = URLRequest(url: Self.api)
         req.timeoutInterval = 20
-        req.setValue("Husk", forHTTPHeaderField: "User-Agent")
+        req.setValue("DroidRun", forHTTPHeaderField: "User-Agent")
         guard let (data, response) = try? await URLSession.shared.data(for: req),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -112,7 +112,7 @@ final class AppUpdates: ObservableObject {
         d.set(Date().timeIntervalSince1970, forKey: Self.checkedKey)
         let version = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
         guard Self.newer(version, than: Self.current), d.string(forKey: Self.dismissedKey) != version else { return }
-        HuskLog.log("update", "Husk \(version) is out (this is \(Self.current))")
+        HuskLog.log("update", "DroidRun \(version) is out (this is \(Self.current))")
         available = Release(version: version, page: page)
     }
 

@@ -63,7 +63,7 @@ struct TLAppSettings: Codable, Equatable {
         }
     }
 
-    /// Where the app opens: full screen, or a window over Husk that can be moved, resized and minimised (Multitasking).
+    /// Where the app opens: full screen, or a window over DroidRun that can be moved, resized and minimised (Multitasking).
     enum WindowMode: String, Codable, CaseIterable, Identifiable {
         /// As Settings › Multitasking says for every app.
         case auto, window, fullScreen
@@ -96,7 +96,7 @@ struct TLAppSettings: Codable, Equatable {
 
     init() {}
 
-    // Settings written by an older Husk lack the keys a newer one added; each falls back to its default.
+    // Settings written by an older DroidRun lack the keys a newer one added; each falls back to its default.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         orientation = try c.decodeIfPresent(Orientation.self, forKey: .orientation) ?? .auto
@@ -150,7 +150,7 @@ struct TLAppSettingsView: View {
         _name = State(initialValue: app.label)
     }
 
-    /// The game is loaded in this run of Husk, so what it keeps cannot be swapped from under it.
+    /// The game is loaded in this run of DroidRun, so what it keeps cannot be swapped from under it.
     private var inUse: Bool {
         guard let loaded = husk_native_loaded_apk().map({ String(cString: $0) }), let apk = app.apks.first else { return false }
         return loaded == apk
@@ -176,7 +176,7 @@ struct TLAppSettingsView: View {
                 }
                 .padding(.vertical, 2)
             } footer: {
-                Text("What the game is called in Husk. The game itself is not changed.")
+                Text("What the game is called in DroidRun. The game itself is not changed.")
             }
 
             Section {
@@ -192,7 +192,7 @@ struct TLAppSettingsView: View {
                 Text("Display")
             } footer: {
                 Text("\(settings.resolution.detail) Orientation and resolution apply the next time the game starts, and a game already "
-                   + "running in this session needs Husk closed and opened again.")
+                   + "running in this session needs DroidRun closed and opened again.")
             }
 
             Section {
@@ -204,8 +204,8 @@ struct TLAppSettingsView: View {
             } header: {
                 Text("Multitasking")
             } footer: {
-                Text("In a window, \(app.label) runs over Husk: move it by its title bar, resize it from the corner, and minimise it to "
-                   + "the dock at the edge of the screen while you use the rest of Husk.")
+                Text("In a window, \(app.label) runs over DroidRun: move it by its title bar, resize it from the corner, and minimise it to "
+                   + "the dock at the edge of the screen while you use the rest of DroidRun.")
             }
 
             Section {
@@ -224,7 +224,7 @@ struct TLAppSettingsView: View {
                 } header: {
                     Text("Mods")
                 } footer: {
-                    Text("Geode is the mod loader for Geometry Dash. With it on, Husk downloads Geode for this version of the "
+                    Text("Geode is the mod loader for Geometry Dash. With it on, DroidRun downloads Geode for this version of the "
                        + "game, and mods are found and installed in the game itself, from Geode's button on the main menu. "
                        + "Applies the next time the game starts.")
                 }
@@ -255,7 +255,7 @@ struct TLAppSettingsView: View {
             } header: {
                 Text("Home Screen")
             } footer: {
-                Text("Puts \(app.label) on your Home Screen with its own icon. Tapping it opens Husk straight into the game. Husk "
+                Text("Puts \(app.label) on your Home Screen with its own icon. Tapping it opens DroidRun straight into the game. DroidRun "
                    + "downloads a profile: open Settings, tap Profile Downloaded, then Install.")
             }
 
@@ -268,7 +268,7 @@ struct TLAppSettingsView: View {
             } header: {
                 Text("Data")
             } footer: {
-                Text(inUse ? "The game is loaded in this session. Close Husk completely and open it again to reset its data."
+                Text(inUse ? "The game is loaded in this session. Close DroidRun completely and open it again to reset its data."
                            : "Deletes what the game saved and downloaded here: saves, settings and caches. The game itself stays.")
             }
         }

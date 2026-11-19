@@ -2145,7 +2145,7 @@ public final class Settings {
             { "system", "dtmf_tone", "1" }, { "system", "user_rotation", "0" }, { "system", "show_password", "1" },
             { "global", "auto_time", "1" }, { "global", "auto_time_zone", "1" }, { "global", "adb_enabled", "0" },
             { "global", "development_settings_enabled", "0" }, { "global", "airplane_mode_on", "0" }, { "global", "animator_duration_scale", "1.0" },
-            { "global", "transition_animation_scale", "1.0" }, { "global", "window_animation_scale", "1.0" }, { "global", "device_name", "Husk" },
+            { "global", "transition_animation_scale", "1.0" }, { "global", "window_animation_scale", "1.0" }, { "global", "device_name", "DroidRun" },
             { "global", "always_finish_activities", "0" }, { "global", "stay_on_while_plugged_in", "0" }, { "global", "wifi_on", "1" },
             { "global", "bluetooth_on", "0" }, { "global", "data_roaming", "0" }, { "global", "install_non_market_apps", "1" },
             { "global", "mobile_data", "1" }, { "global", "boot_count", "1" }, { "global", "zen_mode", "0" },
@@ -2153,7 +2153,7 @@ public final class Settings {
             { "secure", "location_mode", "3" }, { "secure", "default_input_method", "com.android.inputmethod.latin/.LatinIME" },
             { "secure", "enabled_input_methods", "com.android.inputmethod.latin/.LatinIME" }, { "secure", "install_non_market_apps", "1" },
             { "secure", "accessibility_display_magnification_enabled", "0" }, { "secure", "high_text_contrast_enabled", "0" },
-            { "secure", "skip_first_use_hints", "1" }, { "secure", "user_setup_complete", "1" }, { "secure", "bluetooth_name", "Husk" },
+            { "secure", "skip_first_use_hints", "1" }, { "secure", "user_setup_complete", "1" }, { "secure", "bluetooth_name", "DroidRun" },
         };
         for (String[] e : d) sValues.put(e[0] + "/" + e[1], e[2]);
         sValues.put("secure/android_id", huskAndroidId());

@@ -41,12 +41,12 @@ final class HuskAppDelegate: NSObject, UIApplicationDelegate {
     }
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        // The download session reconnects to whatever was running before Husk was closed or relaunched in the background.
+        // The download session reconnects to whatever was running before DroidRun was closed or relaunched in the background.
         _ = Downloads.shared
         return true
     }
 
-    /// iOS woke Husk because background downloads finished or need attention: handle them, then say so.
+    /// iOS woke DroidRun because background downloads finished or need attention: handle them, then say so.
     func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String, completionHandler: @escaping () -> Void) {
         guard identifier == Downloads.sessionID else { completionHandler(); return }
         HuskLog.log("downloads", "woken for background download events")
@@ -88,11 +88,11 @@ struct HuskApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                // An APK shared to Husk, or opened in it from Files.
+                // An APK shared to DroidRun, or opened in it from Files.
                 .onOpenURL { url in
-                    // husk://open_app?unique_identifier=… from a Home Screen clip; anything else may be a shared APK
+                    // droidrun://open_app?unique_identifier=… from a Home Screen clip; anything else may be a shared APK
                     if GameLink.handle(url) { return }
-                    if SigningCertificate.shared.handle(url) { return }   // husk://certificate from SideStore / AltStore
+                    if SigningCertificate.shared.handle(url) { return }   // droidrun://certificate from SideStore / AltStore
                     if !AppClip.handle(url) { IncomingFiles.shared.receive(url) }
                 }
         }

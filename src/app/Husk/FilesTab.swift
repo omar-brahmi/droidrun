@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 
 /// The guest's storage, browsable.
 ///
-/// Husk could already push a file into Android's Download folder and never show
+/// DroidRun could already push a file into Android's Download folder and never show
 /// you what happened to it, which is a one-way street: you cannot check a game
 /// found its data pack, or get a screenshot back, or see why an install failed
 /// on a file that is not where you think it is. Everything here is `stat` and

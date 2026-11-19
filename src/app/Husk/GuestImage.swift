@@ -442,7 +442,7 @@ final class GuestImage: ObservableObject {
         let fm = FileManager.default
         if !fm.fileExists(atPath: firmwarePath) {
             guard let src = Bundle.main.path(forResource: "edk2-aarch64-code", ofType: "fd") else {
-                throw NSError(domain: "husk", code: 1, userInfo: [
+                throw NSError(domain: "droidrun", code: 1, userInfo: [
                     NSLocalizedDescriptionKey: "edk2-aarch64-code.fd missing from the app bundle"])
             }
             // Copied rather than used in place: pflash wants a plain file and the
@@ -476,7 +476,7 @@ final class GuestImage: ObservableObject {
             // \EFI\BOOT\BOOTAA64.EFI, which is where it would have ended up
             // starting from empty anyway.
             guard let seed = Bundle.main.path(forResource: "lineage-efi-vars-seed", ofType: "fd") else {
-                throw NSError(domain: "husk", code: 2, userInfo: [
+                throw NSError(domain: "droidrun", code: 2, userInfo: [
                     NSLocalizedDescriptionKey: "lineage-efi-vars-seed.fd missing from the app bundle"])
             }
             try? fm.removeItem(atPath: varsPath)
@@ -512,7 +512,7 @@ final class GuestImage: ObservableObject {
                 // Check for the replacement before deleting existing data. A
                 // missing resource must not turn an upgrade into a missing disk.
                 guard let seed = Bundle.main.path(forResource: "lineage-vdb-seed", ofType: "qcow2") else {
-                    throw NSError(domain: "husk", code: 3, userInfo: [
+                    throw NSError(domain: "droidrun", code: 3, userInfo: [
                         NSLocalizedDescriptionKey: "lineage-vdb-seed.qcow2 missing from the app bundle"])
                 }
                 HuskLog.log("guest", "userdata seed \(seededWith ?? "unversioned") -> \(seedVersion); "
@@ -525,7 +525,7 @@ final class GuestImage: ObservableObject {
         }
         if !fm.fileExists(atPath: userdataPath) {
             guard let seed = Bundle.main.path(forResource: "lineage-vdb-seed", ofType: "qcow2") else {
-                throw NSError(domain: "husk", code: 3, userInfo: [
+                throw NSError(domain: "droidrun", code: 3, userInfo: [
                     NSLocalizedDescriptionKey: "lineage-vdb-seed.qcow2 missing from the app bundle"])
             }
             try fm.copyItem(atPath: seed, toPath: userdataPath)
@@ -770,7 +770,7 @@ final class GuestImage: ObservableObject {
         // extra field, name, comment and header CRC, in that order.
         var head = try input.read(upToCount: 10) ?? Data()
         guard head.count == 10, head[0] == 0x1f, head[1] == 0x8b, head[2] == 8 else {
-            throw NSError(domain: "husk", code: 1, userInfo:
+            throw NSError(domain: "droidrun", code: 1, userInfo:
                 [NSLocalizedDescriptionKey: "not a gzip file"])
         }
         let flg = head[3]
@@ -791,7 +791,7 @@ final class GuestImage: ObservableObject {
                                         src_size: 0, state: nil)
         guard compression_stream_init(&stream, COMPRESSION_STREAM_DECODE,
                                       COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else {
-            throw NSError(domain: "husk", code: 2, userInfo:
+            throw NSError(domain: "droidrun", code: 2, userInfo:
                 [NSLocalizedDescriptionKey: "inflate init failed"])
         }
         defer { compression_stream_destroy(&stream) }
@@ -818,7 +818,7 @@ final class GuestImage: ObservableObject {
                     }
                     if st == COMPRESSION_STATUS_END { finished = true; break }
                     if st == COMPRESSION_STATUS_ERROR {
-                        throw NSError(domain: "husk", code: 3, userInfo:
+                        throw NSError(domain: "droidrun", code: 3, userInfo:
                             [NSLocalizedDescriptionKey: "inflate failed"])
                     }
                 } while stream.src_size > 0 || (last && !finished)
@@ -1044,7 +1044,7 @@ private final class SnapshotFetcher: NSObject, URLSessionDownloadDelegate {
     private func fail(_ message: String) {
         try? FileManager.default.removeItem(at: staged)
         session.invalidateAndCancel()
-        onDone(.failure(NSError(domain: "husk", code: 10,
+        onDone(.failure(NSError(domain: "droidrun", code: 10,
                                 userInfo: [NSLocalizedDescriptionKey: message])))
     }
 

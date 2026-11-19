@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// A Husk account on the website (itslevii.dev): sign in, the profile (avatar, name, @handle, games, apps, playtime, recently
+// A DroidRun account on the website (itslevii.dev): sign in, the profile (avatar, name, @handle, games, apps, playtime, recently
 // played, achievements), and the library it shows, sent from here. The session token lives in the Keychain.
 import Foundation
 import Security
@@ -46,7 +46,7 @@ struct AccountError: LocalizedError {
 
 // MARK: - playtime
 
-/// How long each game has been played from Husk, kept on this iPhone: a session starts when its screen appears and is
+/// How long each game has been played from DroidRun, kept on this iPhone: a session starts when its screen appears and is
 /// counted when it goes.
 @MainActor enum Playtime {
     private static let key = "husk.playtime"
@@ -100,7 +100,7 @@ struct AccountError: LocalizedError {
     // MARK: talking to the site
 
     private func call(_ method: String, _ path: String, body: [String: Any]? = nil, auth: Bool = true) async throws -> Data {
-        var last: Error = AccountError(message: "The Husk website did not answer.")
+        var last: Error = AccountError(message: "The DroidRun website did not answer.")
         for site in CompatibilityStore.sites {
             var r = URLRequest(url: site.appendingPathComponent(path))
             r.httpMethod = method
@@ -113,7 +113,7 @@ struct AccountError: LocalizedError {
                 guard let http = resp as? HTTPURLResponse else { continue }
                 // the site's database is down: its answer, not an outage to try the old address for
                 if CompatibilityStore.isMaintenance(http, data) { throw AccountError(message: CompatibilityStore.maintenanceMessage) }
-                if http.statusCode >= 500 { last = AccountError(message: "The Husk website had a problem (\(http.statusCode))."); continue }
+                if http.statusCode >= 500 { last = AccountError(message: "The DroidRun website had a problem (\(http.statusCode))."); continue }
                 if http.statusCode == 401, auth { forget() }
                 if http.statusCode >= 400 {
                     let msg = (try? JSONDecoder().decode(SiteError.self, from: data))?.error ?? "Something went wrong (\(http.statusCode))."
@@ -243,7 +243,7 @@ extension LibraryItem {
 
 private enum Keychain {
     private static let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                               kSecAttrService as String: "com.husk.account",
+                                               kSecAttrService as String: "com.droidrun.account",
                                                kSecAttrAccount as String: "session"]
     static func read() -> String? {
         var q = query

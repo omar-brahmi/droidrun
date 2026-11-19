@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Import APK: a file from Files (or dropped on iPad), what Husk takes, and the other ways to get a game: the Store, a link.
+// Import APK: a file from Files (or dropped on iPad), what DroidRun takes, and the other ways to get a game: the Store, a link.
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -47,7 +47,7 @@ struct ImportView: View {
                 }
                 Button("Cancel", role: .cancel) { link = "" }
             } message: {
-                Text("A direct link to an APK, a bundle or a zip. It shows in Downloads, then Husk asks where it goes.")
+                Text("A direct link to an APK, a bundle or a zip. It shows in Downloads, then DroidRun asks where it goes.")
             }
         }
     }

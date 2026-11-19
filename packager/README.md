@@ -28,7 +28,7 @@ Android native libraries (`.so`) are converted to iOS dylibs on a GitHub macOS r
 Pack by hand on the PC, with artifacts from the workflow:
 
 ```
-python pack.py Husk.ipa dylibs DroidRun.ipa --exe Husk --runtime runtime --name DroidRun
+python pack.py Husk.ipa dylibs DroidRun.ipa --app DroidRun.app --runtime runtime
 ```
 
 ## Limits
@@ -36,5 +36,6 @@ python pack.py Husk.ipa dylibs DroidRun.ipa --exe Husk --runtime runtime --name 
 - The base is the official Husk 3.4 IPA (commit `29abb51`). The dylib names carry the converter's version and each
   library's hash, so a mismatch is ignored, not loaded.
 - Code generated while the app runs (LuaJIT, Mono JIT) still needs JIT.
-- The bundle identifier stays `com.husk.app`: DroidRun replaces an installed Husk and keeps its data.
+- The app is `DroidRun.app` with the identifier `com.droidrun.app`, so it installs next to Husk, not over it. The
+  base's app extensions (JIT helper, downloads widget) are left out.
 - Free Apple ID: the app expires after 7 days. Re-sign with Sideloadly.

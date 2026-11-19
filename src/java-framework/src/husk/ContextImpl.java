@@ -207,7 +207,7 @@ public final class ContextImpl extends Context {
             if (av == null) continue;
             try { k.setAccessible(true); return k.newInstance(av); } catch (Throwable t) { last = t instanceof java.lang.reflect.InvocationTargetException && t.getCause() != null ? t.getCause() : t; }
         }
-        if (last != null) android.util.Log.w("Husk", "no " + name + " service: " + cls.getName() + " could not be made", last);
+        if (last != null) android.util.Log.w("DroidRun", "no " + name + " service: " + cls.getName() + " could not be made", last);
         return null;
     }
 }

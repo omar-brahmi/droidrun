@@ -295,7 +295,7 @@ public final class ResInflate {
                 d.inflate(r, p, set, t);
                 return d;
             }
-            android.util.Log.w("Husk", "unknown drawable tag " + name + " " + p.getPositionDescription());
+            android.util.Log.w("DroidRun", "unknown drawable tag " + name + " " + p.getPositionDescription());
             skip(p);
             return new ColorDrawable(0);
         }

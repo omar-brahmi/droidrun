@@ -243,7 +243,7 @@ final class PlayStoreManager: ObservableObject {
                 self.downloadTasks[pkg] = nil
                 self.downloadTitles.removeValue(forKey: pkg)
 
-                // Hand to Husk's IncomingFiles flow, which automatically presents IncomingChooser!
+                // Hand to DroidRun's IncomingFiles flow, which automatically presents IncomingChooser!
                 IncomingFiles.shared.receive(files)
             } catch {
                 self.downloadProgress.removeValue(forKey: pkg)

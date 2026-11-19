@@ -276,7 +276,7 @@ static struct audio_pcm_ops husk_pcm_ops = {
 
 static struct audio_driver husk_audio_driver = {
     .name           = "husk",
-    .descr          = "Husk iOS audio",
+    .descr          = "DroidRun iOS audio",
     .init           = husk_audio_init,
     .fini           = husk_audio_fini,
     .pcm_ops        = &husk_pcm_ops,

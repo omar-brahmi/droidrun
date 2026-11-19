@@ -2,7 +2,7 @@
 import SwiftUI
 import UIKit
 
-/// Routes between the four things Husk can be doing.
+/// Routes between the four things DroidRun can be doing.
 ///
 /// The guest runs continuously once started; these are presentation states, not
 /// lifecycle states. In particular `library` and `running` are the same VM --
@@ -14,7 +14,7 @@ struct ContentView: View {
     @ObservedObject private var host = AndroidHost.shared
 
     @State private var started = false
-    /// Asking before full Android starts: it is the experimental part of Husk
+    /// Asking before full Android starts: it is the experimental part of DroidRun
     @State private var confirmAndroid = false
     @State private var showLogs = false
     /// True while the guest's own screen is being shown instead of the library.
@@ -74,7 +74,7 @@ struct ContentView: View {
                 Snowfall().ignoresSafeArea()
             }
 
-            // Multitasking: an app in a window over everything else in Husk (AppWindows.swift).
+            // Multitasking: an app in a window over everything else in DroidRun (AppWindows.swift).
             AppWindowLayer()
                 .ignoresSafeArea(.keyboard)
 
@@ -105,7 +105,7 @@ struct ContentView: View {
                     .allowsHitTesting(showGuestScreen)
             }
 
-            // Over the tabs and over the start screen: when Husk is starting
+            // Over the tabs and over the start screen: when DroidRun is starting
             // Android for you, that is the whole screen until it is done.
             if booting {
                 BootScreen { withAnimation(.easeInOut(duration: 0.3)) { booting = false } }
@@ -145,7 +145,7 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showLogs) { LogView() }
-        // A game that ended Husk last time: say so, with its report.
+        // A game that ended DroidRun last time: say so, with its report.
         .sheet(item: Binding(get: { showOnboarding ? nil : crash.pending }, set: { crash.pending = $0 }),
                onDismiss: { if WhatsNew.due { showWhatsNew = true } }) { r in
             CrashReportSheet(report: r)
@@ -154,8 +154,8 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $showWhatsNew) {
             WhatsNewSheet { WhatsNew.markSeen(); showWhatsNew = false }
         }
-        // A newer Husk is on GitHub.
-        .alert("Husk \(updates.available?.version ?? "") Is Available", isPresented: Binding(
+        // A newer DroidRun is on GitHub.
+        .alert("DroidRun \(updates.available?.version ?? "") Is Available", isPresented: Binding(
                 get: { updates.available != nil && !showOnboarding && !showWhatsNew && crash.pending == nil },
                 set: { if !$0 { updates.dismiss() } })) {
             Button("View Release") {
@@ -183,7 +183,7 @@ struct ContentView: View {
             let n = showcase.updates.count
             Text("Metadata for \(n) of your app\(n == 1 ? "" : "s") has been updated. Would you like to download the updates?")
         }
-        // An APK shared to Husk: where does it go?
+        // An APK shared to DroidRun: where does it go?
         .sheet(isPresented: Binding(get: { !incoming.waiting.isEmpty },
                                     set: { if !$0 { incoming.discard() } })) {
             IncomingChooser()
@@ -200,7 +200,7 @@ struct ContentView: View {
         }
         .onChange(of: host.busy) { _ in incoming.installForAndroidIfReady() }
         .sheet(isPresented: $jit.showSetup) { JITSetupFlow() }
-        // The built-in helper attaches while Husk stays in the foreground, so
+        // The built-in helper attaches while DroidRun stays in the foreground, so
         // there is no relaunch to trigger the region claim below; this is it.
         .onChange(of: jit.attachGeneration) { _ in evaluate() }
         // Asking rather than downloading. Two gigabytes over someone's cellular
@@ -228,7 +228,7 @@ struct ContentView: View {
         // deprecated there but still works, and is the only one that compiles
         // against the 16.0 deployment target.
         .onChange(of: scenePhase) { phase in
-            // StikDebug relaunches Husk after attaching, so returning to the
+            // StikDebug relaunches DroidRun after attaching, so returning to the
             // foreground is the moment worth re-checking, not first launch.
             if phase == .active { evaluate() }
         }
@@ -248,13 +248,13 @@ struct ContentView: View {
         })
     }
 
-    /// Every package Husk holds, from both sides: what the picture index is read for.
+    /// Every package DroidRun holds, from both sides: what the picture index is read for.
     private var showcasePackages: Set<String> {
         Set(tlStore.apps.compactMap(\.packageName) + host.packages.map(\.name))
     }
 
     private func evaluate() {
-        // Before anything else wants JIT: the setting that turns it on as Husk opens.
+        // Before anything else wants JIT: the setting that turns it on as DroidRun opens.
         jit.enableAtLaunchIfAsked()
         try? guest.prepareFirmware()
         guest.refresh()
@@ -286,10 +286,10 @@ struct ContentView: View {
         // who answered yes has made the decision -- continuing to ignore it
         // just means every launch begins by pressing Start.
         //
-        // Only when Android was already installed as Husk opened (#75, #128): evaluate() runs on every return to the foreground,
-        // so an image that finished downloading in this run would otherwise start the moment Husk came back -- with a debugger
-        // that iOS may have suspended hours into the download, whose unanswered trap ends Husk. And not again after a start
-        // that Husk did not survive, or every launch would end the same way.
+        // Only when Android was already installed as DroidRun opened (#75, #128): evaluate() runs on every return to the foreground,
+        // so an image that finished downloading in this run would otherwise start the moment DroidRun came back -- with a debugger
+        // that iOS may have suspended hours into the download, whose unanswered trap ends DroidRun. And not again after a start
+        // that DroidRun did not survive, or every launch would end the same way.
         guard Onboarding.autoStart, !started, guest.state == .ready,
               !showOnboarding else { return }
         guard AutoStart.readyAtLaunch == true else {
@@ -297,7 +297,7 @@ struct ContentView: View {
             return
         }
         guard !AutoStart.lastOneDied() else {
-            HuskLog.log("ui", "Husk closed while starting Android on launch last time; not starting it on its own this time")
+            HuskLog.log("ui", "DroidRun closed while starting Android on launch last time; not starting it on its own this time")
             return
         }
         HuskLog.log("ui", "starting Android on launch")
@@ -343,7 +343,7 @@ struct ContentView: View {
         // Which route is available is now measured. It used to be predicted
         // from the device model and the iOS version, and the prediction was
         // wrong for iOS 26: StikDebug attaches there without servicing traps,
-        // because on that OS it does not need to, and Husk read that as "no
+        // because on that OS it does not need to, and DroidRun read that as "no
         // executable memory" and refused to start a guest that would have run.
         if !JITBootstrap.prewarm(), !JITBootstrap.isLive {
             guard JITBootstrap.mapJITWorks else {
@@ -351,7 +351,7 @@ struct ContentView: View {
                                  + "answering and MAP_JIT does not execute here")
                 // Said on screen too: a Start button that silently does nothing reads as a hang (#122).
                 host.say("Android can't start without JIT",
-                         JITBootstrap.lastFailure ?? "Husk could not get executable memory. Turn JIT on again (Settings > JIT) and retry.",
+                         JITBootstrap.lastFailure ?? "DroidRun could not get executable memory. Turn JIT on again (Settings > JIT) and retry.",
                          good: false)
                 booting = false
                 return
@@ -361,7 +361,7 @@ struct ContentView: View {
         }
         // A PS4 game started in this run holds the same JIT region QEMU would take.
         if let console = husk_console_loaded_game() {
-            HuskLog.log("jit", "refusing to start QEMU: \(String(cString: console)) is loaded in this run; close Husk first")
+            HuskLog.log("jit", "refusing to start QEMU: \(String(cString: console)) is loaded in this run; close DroidRun first")
             return
         }
         started = true
@@ -481,7 +481,7 @@ struct GuestScreenView: View {
 
                         Menu {
                             Button { onBack() } label: {
-                                Label("Back to Husk", systemImage: "chevron.left")
+                                Label("Back to DroidRun", systemImage: "chevron.left")
                             }
                             // Android's own Home key, over the bridge. Three-button
                             // navigation is not drawn in this guest, so without it
@@ -627,7 +627,7 @@ struct ShareSheet: UIViewControllerRepresentable {
 
 /// What is driving the guest, and what could be.
 ///
-/// Touch is the only input Husk actually delivers today; the keyboard is real
+/// Touch is the only input DroidRun actually delivers today; the keyboard is real
 /// but optional, and a gamepad and a pointer are not built yet. They are listed
 /// anyway, dimmed: a control surface that hides what it cannot do leaves you
 /// wondering whether you simply cannot find it.
@@ -744,8 +744,8 @@ private struct AndroidStartWarning: View {
     }
 }
 
-/// Starting Android on launch, made safe to repeat: whether the image was there as Husk opened, and a marker that is only on
-/// disk while an automatic start is under way, so a start Husk did not survive is not tried again on the next launch.
+/// Starting Android on launch, made safe to repeat: whether the image was there as DroidRun opened, and a marker that is only on
+/// disk while an automatic start is under way, so a start DroidRun did not survive is not tried again on the next launch.
 enum AutoStart {
     /// Whether the guest was ready on the first look in this process; nil before it.
     nonisolated(unsafe) static var readyAtLaunch: Bool?

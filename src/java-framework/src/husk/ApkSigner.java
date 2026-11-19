@@ -19,8 +19,8 @@ public final class ApkSigner {
         if (sCerts != null) return sCerts;
         byte[][] c = null;
         String apk = Native.apkPath();
-        try { c = fromSigningBlock(apk); } catch (Throwable t) { android.util.Log.w("Husk", "apk signing block: " + t); }
-        if (c == null || c.length == 0) try { c = fromJar(apk); } catch (Throwable t) { android.util.Log.w("Husk", "apk v1 signature: " + t); }
+        try { c = fromSigningBlock(apk); } catch (Throwable t) { android.util.Log.w("DroidRun", "apk signing block: " + t); }
+        if (c == null || c.length == 0) try { c = fromJar(apk); } catch (Throwable t) { android.util.Log.w("DroidRun", "apk v1 signature: " + t); }
         if (c == null) c = new byte[0][];
         return sCerts = c;
     }

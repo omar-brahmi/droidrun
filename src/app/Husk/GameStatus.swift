@@ -2,7 +2,7 @@
 import SwiftUI
 import UIKit
 
-/// How a game did the last time it was played here, noted by Husk itself: it played, it crashed, or it would not start.
+/// How a game did the last time it was played here, noted by DroidRun itself: it played, it crashed, or it would not start.
 ///
 /// Written to status.json in the game's folder as it happens, so the library can say at a glance which games work on this
 /// iPhone without anyone keeping a list.

@@ -5,7 +5,7 @@ import Foundation
 /// registration through /checkin and /fdfe/uploadDeviceConfig, then the store itself under /fdfe -- details, search, the free
 /// "purchase" that every download starts with, and delivery, which answers with the files' addresses.
 ///
-/// Written for Husk from how those requests look on the wire; it shares no code with any other client.
+/// Written for DroidRun from how those requests look on the wire; it shares no code with any other client.
 struct PlayError: LocalizedError {
     let message: String
     init(_ message: String) { self.message = message }
@@ -765,7 +765,7 @@ enum PlayAPI {
         }
 
         if ProcessInfo.processInfo.environment["HUSK_PLAY_DUMP"] != nil {
-            // what Play sent, field by field (asset packs and expansion files are in fields Husk did not read)
+            // what Play sent, field by field (asset packs and expansion files are in fields DroidRun did not read)
             func dump(_ m: ProtoMessage, _ indent: String, _ depth: Int) {
                 for k in m.fields.keys.sorted() {
                     let subs = m.messages(k)

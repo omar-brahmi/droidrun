@@ -2,12 +2,12 @@
 import SwiftUI
 import UIKit
 
-/// Multitasking, after LiveContainer's: an app opens in a window over Husk instead of taking the screen, so the rest of Husk stays
+/// Multitasking, after LiveContainer's: an app opens in a window over DroidRun instead of taking the screen, so the rest of DroidRun stays
 /// usable while it runs. The window has a title bar to drag it by, a corner to resize it from, and close / minimise / maximise
 /// buttons; minimised, it waits in a dock at the edge of the screen.
 ///
-/// LiveContainer runs each app in a process of its own and can show several. Husk's engines share this process, so a
-/// different native game needs Husk closed first. Closing the window pauses the app, as leaving full screen does.
+/// LiveContainer runs each app in a process of its own and can show several. DroidRun's engines share this process, so a
+/// different native game needs DroidRun closed first. Closing the window pauses the app, as leaving full screen does.
 @MainActor final class AppWindows: ObservableObject {
     static let shared = AppWindows()
 
@@ -57,7 +57,7 @@ import UIKit
     func toggleMaximized() { withAnimation(.snappy(duration: 0.25)) { maximized.toggle() } }
 }
 
-/// The layer the window and the dock live in, over the tabs. Empty space in it lets touches through to Husk underneath.
+/// The layer the window and the dock live in, over the tabs. Empty space in it lets touches through to DroidRun underneath.
 struct AppWindowLayer: View {
     @ObservedObject private var windows = AppWindows.shared
 

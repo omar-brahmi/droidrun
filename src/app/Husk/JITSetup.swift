@@ -4,7 +4,7 @@ import Network
 import SwiftUI
 import UIKit
 
-/// How Husk gets a debugger attached. See docs/06-built-in-jit.md.
+/// How DroidRun gets a debugger attached. See docs/06-built-in-jit.md.
 enum JITMethod: String, CaseIterable, Identifiable {
     /// StikDebug when it is installed, then TrollStore, otherwise Built-in StikJIT.
     case automatic
@@ -27,7 +27,7 @@ enum JITMethod: String, CaseIterable, Identifiable {
 
 /// Where Built-in StikJIT's pairing file came from.
 enum JITPairingSource: String {
-    /// Made by Husk on this device (iOS 27, OnDevicePairing).
+    /// Made by DroidRun on this device (iOS 27, OnDevicePairing).
     case onDevice
     /// Imported from a file made on a computer.
     case imported
@@ -35,7 +35,7 @@ enum JITPairingSource: String {
 
 /// The RPPairing file Built-in StikJIT authenticates with. Lives in Documents,
 /// so it is visible through Finder file sharing -- it is device-sensitive and
-/// is only ever sent to Husk's own helper process.
+/// is only ever sent to DroidRun's own helper process.
 enum JITPairingFileStore {
     static var directory: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -105,10 +105,10 @@ final class JITCoordinator: ObservableObject {
         var message: String {
             switch self {
             case .vpn:
-                return "Husk couldn't reach this device. Connect LocalDevVPN, then try again."
+                return "DroidRun couldn't reach this device. Connect LocalDevVPN, then try again."
             case .pairing:
                 return "This device closed the connection, which usually means it no longer accepts "
-                     + "Husk's pairing. Pair again, and check that LocalDevVPN is connected."
+                     + "DroidRun's pairing. Pair again, and check that LocalDevVPN is connected."
             }
         }
     }
@@ -125,7 +125,7 @@ final class JITCoordinator: ObservableObject {
     /// The setup check passed for the current pairing file.
     @Published private(set) var prepared = false
     @Published private(set) var pairingSource = JITPairingFileStore.source
-    /// Bumped each time the built-in helper attaches. Husk stays in the
+    /// Bumped each time the built-in helper attaches. DroidRun stays in the
     /// foreground for that, so nothing else tells ContentView to claim the region.
     @Published private(set) var attachGeneration = 0
 
@@ -146,10 +146,10 @@ final class JITCoordinator: ObservableObject {
 
     var automaticDescription: String {
         switch resolvedMethod {
-        case .stikDebug: return "StikDebug is installed, so Husk will open it."
-        case .trollStore: return "TrollStore is installed, so Husk will ask it to enable JIT."
+        case .stikDebug: return "StikDebug is installed, so DroidRun will open it."
+        case .trollStore: return "TrollStore is installed, so DroidRun will ask it to enable JIT."
         case .jailbreak: return "This device is jailbroken, so JIT comes from the jailbreak's Allow JIT in Apps setting."
-        default: return "StikDebug, TrollStore and a jailbreak were not found, so Husk will use its built-in helper."
+        default: return "StikDebug, TrollStore and a jailbreak were not found, so DroidRun will use its built-in helper."
         }
     }
 
@@ -161,14 +161,14 @@ final class JITCoordinator: ObservableObject {
 
     /// Get a debugger attached with whichever method applies, or open the setup
     /// walkthrough when that method is not set up yet.
-    /// "Turn on JIT at launch": when Husk opens without JIT, ask the built-in StikJIT for it straight away, once per launch.
-    /// Only when StikJIT can do it unattended -- it is available here and already paired -- so opening Husk never lands in
+    /// "Turn on JIT at launch": when DroidRun opens without JIT, ask the built-in StikJIT for it straight away, once per launch.
+    /// Only when StikJIT can do it unattended -- it is available here and already paired -- so opening DroidRun never lands in
     /// the setup walkthrough by surprise.
     static let autoEnableKey = "husk.jit.autoEnable"
     private var autoTried = false
 
-    /// A Husk TrollStore installed asks TrollStore for JIT each time it opens without it (#135), unless turned off in Settings:
-    /// TrollStore attaches to the running Husk for a moment, with nothing to tap.
+    /// A DroidRun TrollStore installed asks TrollStore for JIT each time it opens without it (#135), unless turned off in Settings:
+    /// TrollStore attaches to the running DroidRun for a moment, with nothing to tap.
     static let trollStoreAutoKey = "husk.jit.trollStoreAuto"
     static var trollStoreAuto: Bool { UserDefaults.standard.object(forKey: trollStoreAutoKey) as? Bool ?? true }
 
@@ -216,12 +216,12 @@ final class JITCoordinator: ObservableObject {
             if JITBootstrap.requestTrollStoreAttach() {
                 awaitTrollStore()
             } else {
-                error = "TrollStore could not be opened. Install Husk through TrollStore, or choose another method."
+                error = "TrollStore could not be opened. Install DroidRun through TrollStore, or choose another method."
                 showSetup = true
             }
         case .jailbreak:
             // Nothing to ask: a jailbreak marks an app as debugged as it opens, if it has been told to. Say what to turn on.
-            error = "Turn on Allow JIT in Apps in Dopamine's settings, then open Husk again."
+            error = "Turn on Allow JIT in Apps in Dopamine's settings, then open DroidRun again."
             showSetup = true
         case .builtIn:
             guard HuskBuiltInJIT.isAvailable, hasPairing else {
@@ -233,7 +233,7 @@ final class JITCoordinator: ObservableObject {
         }
     }
 
-    /// After TrollStore is asked: it opens Husk again and attaches to it for a moment, which marks the process as debugged. Watch for
+    /// After TrollStore is asked: it opens DroidRun again and attaches to it for a moment, which marks the process as debugged. Watch for
     /// that, so the Games tab and the Library notice without waiting for another trip to the foreground, and say what to check if
     /// it never comes -- TrollStore only answers enable-jit once its URL Scheme setting is on.
     private func awaitTrollStore() {
@@ -250,7 +250,7 @@ final class JITCoordinator: ObservableObject {
                 log("TrollStore enabled JIT")
             } else {
                 status = nil
-                error = "TrollStore did not enable JIT. In TrollStore's Settings turn on URL Scheme, and make sure Husk was "
+                error = "TrollStore did not enable JIT. In TrollStore's Settings turn on URL Scheme, and make sure DroidRun was "
                       + "installed through TrollStore (or is signed with get-task-allow)."
                 log("TrollStore did not enable JIT within a minute")
                 showSetup = true
@@ -336,14 +336,14 @@ final class JITCoordinator: ObservableObject {
     func enableBuiltIn() {
         guard let pairing = builtInPairing() else { return }
         guard let script = JITBootstrap.scriptBase64 else {
-            error = "Husk's JIT script is missing from this installation. Reinstall Husk."
+            error = "DroidRun's JIT script is missing from this installation. Reinstall DroidRun."
             return
         }
 
         busy = true
         error = nil
         connectionProblem = nil
-        status = "Starting Husk's JIT helper…"
+        status = "Starting DroidRun's JIT helper…"
         log("enabling JIT with the built-in helper")
         var readiness: Timer?
         var finished = false
@@ -376,7 +376,7 @@ final class JITCoordinator: ObservableObject {
                     }
                 },
                 completion: { [weak self] result in
-                    // The helper replies once Husk detaches, or when attaching failed.
+                    // The helper replies once DroidRun detaches, or when attaching failed.
                     switch result {
                     case .success(let response):
                         self?.txmPresent = response.txmPresent
@@ -451,7 +451,7 @@ final class JITCoordinator: ObservableObject {
 /// open it to connect when it is installed, otherwise its App Store page.
 enum LocalDevVPN {
     static let appStore = URL(string: "https://apps.apple.com/us/app/localdevvpn/id6755608044")!
-    /// `enable` connects the VPN; `scheme` has LocalDevVPN return to Husk afterwards.
+    /// `enable` connects the VPN; `scheme` has LocalDevVPN return to DroidRun afterwards.
     static let connect = URL(string: "localdevvpn://enable?scheme=husk")!
 
     static var isInstalled: Bool { UIApplication.shared.canOpenURL(URL(string: "localdevvpn://")!) }
@@ -469,7 +469,7 @@ enum LocalDevVPN {
 /// Built-in StikJIT keeps working after the device restarts.
 enum RemotePairingPortDiscovery {
     private static let serviceType = "_remotepairing._tcp"
-    private static let queue = DispatchQueue(label: "com.husk.app.remotepairing-discovery", qos: .utility)
+    private static let queue = DispatchQueue(label: "com.droidrun.app.remotepairing-discovery", qos: .utility)
     private static let lock = NSLock()
     private static var cachedPort: UInt16?
     private static var lastFailure: Date?

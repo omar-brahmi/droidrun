@@ -1,15 +1,15 @@
 import SwiftUI
 import UIKit
 
-/// The developer mass test: every APK in a folder the user makes in Husk's Files folder, `DeveloperTesting`, tried in turn in this
-/// run of Husk. Each APK is imported, played, watched, written down -- it runs, it started and then stopped, it never started, or
-/// Husk itself went down with it (found on the next launch) -- then the session is cleared so the next APK can start. A crash still
+/// The developer mass test: every APK in a folder the user makes in DroidRun's Files folder, `DeveloperTesting`, tried in turn in this
+/// run of DroidRun. Each APK is imported, played, watched, written down -- it runs, it started and then stopped, it never started, or
+/// DroidRun itself went down with it (found on the next launch) -- then the session is cleared so the next APK can start. A crash still
 /// resumes on the following launch. At the end the results, with each app's diagnosis and the end of its log, are one file to share.
 @MainActor
 final class MassTest: ObservableObject {
     static let shared = MassTest()
 
-    /// The user's folder. Husk never makes it: its being there, with APKs in it, is what turns the test on.
+    /// The user's folder. DroidRun never makes it: its being there, with APKs in it, is what turns the test on.
     static var folder: URL { docs.appendingPathComponent("DeveloperTesting", isDirectory: true) }
     static var resultsURL: URL { docs.appendingPathComponent("DeveloperTesting Results.txt") }
     private static var docs: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
@@ -18,7 +18,7 @@ final class MassTest: ObservableObject {
     /// How long a started app is watched before it counts as running, and how long one that never starts is waited for.
     private static let watchSeconds = 15.0
     private static let startTimeout = 60.0
-    /// After JIT is on: a few seconds for the rest of Husk to settle before the app is played.
+    /// After JIT is on: a few seconds for the rest of DroidRun to settle before the app is played.
     private static let settleSeconds = 5.0
 
     struct Result: Codable {
@@ -45,7 +45,7 @@ final class MassTest: ObservableObject {
     @Published var shareResults = false
     @Published private(set) var status = ""
 
-    /// One app per run of Husk: set once this run has resumed or started the test.
+    /// One app per run of DroidRun: set once this run has resumed or started the test.
     private var ranThisProcess = false
 
     private init() { state = Self.load() }
@@ -115,18 +115,18 @@ final class MassTest: ObservableObject {
 
     // MARK: - Each launch
 
-    /// At launch, before Husk opens anything else: the previous app's fate if Husk went down with it, then the next app.
+    /// At launch, before DroidRun opens anything else: the previous app's fate if DroidRun went down with it, then the next app.
     func resume(crash: CrashReport) {
         guard !ranThisProcess, var s = state, s.index < s.queue.count else { return }
         ranThisProcess = true
         if s.launched {
-            // Played in the last run and never written down: Husk did not survive it.
+            // Played in the last run and never written down: DroidRun did not survive it.
             let file = s.queue[s.index]
-            var outcome = "Husk closed without a record (iOS memory limit, or swiped away)"
+            var outcome = "DroidRun closed without a record (iOS memory limit, or swiped away)"
             var diagnosis = ""
             var lines = Self.crashBlock(of: CrashReport.previousLogURL) + ["--- end of that run's log ---"] + Self.tail(of: CrashReport.previousLogURL, 60)
             if let r = crash.pending {
-                outcome = "Husk crashed: \(r.cause.title)"
+                outcome = "DroidRun crashed: \(r.cause.title)"
                 diagnosis = r.cause.detail
                 if !r.excerpt.isEmpty { lines = r.excerpt }
             }
@@ -158,7 +158,7 @@ final class MassTest: ObservableObject {
                 let urls = Self.files(of: file)
                 id = await Task.detached(priority: .userInitiated) { TranslationLayerStore.importCopy(urls) }.value
             }
-            guard let appID = id else { record(file: file, app: nil, outcome: "Could not be imported (not an APK Husk can read)", frames: 0, seconds: 0); return }
+            guard let appID = id else { record(file: file, app: nil, outcome: "Could not be imported (not an APK DroidRun can read)", frames: 0, seconds: 0); return }
             s.appIDs[file] = appID
             state = s
             save()
@@ -217,7 +217,7 @@ final class MassTest: ObservableObject {
         }
     }
 
-    /// Writes one app's result, stops its session, and starts the next APK in this run of Husk.
+    /// Writes one app's result, stops its session, and starts the next APK in this run of DroidRun.
     private func record(file: String, app: TLApp?, outcome: String, frames: UInt, seconds: Double, diagnosis: String? = nil) {
         guard var s = state else { return }
         var log: [String] = []
@@ -273,7 +273,7 @@ final class MassTest: ObservableObject {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
         let commit = Bundle.main.object(forInfoDictionaryKey: "HuskBuildCommit") as? String ?? "?"
-        var out = "Husk mass test -- build \(build) (\(commit)), \(UIDevice.current.model) iOS \(UIDevice.current.systemVersion)\n"
+        var out = "DroidRun mass test -- build \(build) (\(commit)), \(UIDevice.current.model) iOS \(UIDevice.current.systemVersion)\n"
         out += "Started \(f.string(from: s.startedAt)); \(s.results.count) of \(s.queue.count) tested\n\n"
         for r in s.results { out += "\(r.outcome.padding(toLength: 44, withPad: " ", startingAt: 0))  \(r.file)  [\(r.engine)]\n" }
         for r in s.results {
@@ -307,7 +307,7 @@ struct MassTestView: View {
                 if let files {
                     Text(files.isEmpty ? "The DeveloperTesting folder is empty." : "\(files.count) apps in DeveloperTesting.")
                 } else {
-                    Text("Make a folder named DeveloperTesting in Husk's folder (Files > On My iPhone > Husk) and put the APKs to test in it: an APK each, or a folder per app with its base and split APKs.")
+                    Text("Make a folder named DeveloperTesting in DroidRun's folder (Files > On My iPhone > DroidRun) and put the APKs to test in it: an APK each, or a folder per app with its base and split APKs.")
                         .foregroundStyle(.secondary)
                 }
                 if let s = test.state {
@@ -315,7 +315,7 @@ struct MassTestView: View {
                 }
                 if !test.status.isEmpty { Text(test.status).font(.caption).foregroundStyle(.secondary) }
             } footer: {
-                Text("Each app is played once JIT is on, watched for 15 seconds, and written down; then Husk closes. Open Husk again for the next one. At the end the results file is offered to share.")
+                Text("Each app is played once JIT is on, watched for 15 seconds, and written down; then DroidRun closes. Open DroidRun again for the next one. At the end the results file is offered to share.")
             }
             Section {
                 if test.active {

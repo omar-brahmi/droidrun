@@ -11,11 +11,11 @@
 "Android App Bundle (XAPK)" = "Androidアプリバンドル (XAPK)";
 
 /* Bundle display name */
-"CFBundleDisplayName" = "Husk";
+"CFBundleDisplayName" = "DroidRun";
 
 /* Bundle name */
-"CFBundleName" = "Husk";
+"CFBundleName" = "DroidRun";
 
 /* Privacy - Local Network Usage Description */
-"NSLocalNetworkUsageDescription" = "HuskはPCを使わずにJITを有効化するため、ローカルネットワーク経由でこのiPhoneとペアリングを行います。";
+"NSLocalNetworkUsageDescription" = "DroidRunはPCを使わずにJITを有効化するため、ローカルネットワーク経由でこのiPhoneとペアリングを行います。";
 

@@ -4,12 +4,12 @@ import StikJIT
 
 /// The debugger half of Built-in StikJIT (docs/06-built-in-jit.md).
 ///
-/// A process cannot synchronously debug itself, so Husk starts this extension,
+/// A process cannot synchronously debug itself, so DroidRun starts this extension,
 /// sends it its PID, the pairing file and husk-jit.js, and StikJIT attaches over
-/// LocalDevVPN and services the script's trap requests until Husk detaches.
+/// LocalDevVPN and services the script's trap requests until DroidRun detaches.
 private enum HuskJITWork {
     /// One request at a time: enabling JIT holds this queue while the debugger is attached.
-    static let queue = DispatchQueue(label: "com.husk.app.jit-helper")
+    static let queue = DispatchQueue(label: "com.droidrun.app.jit-helper")
 
     static func handle(_ request: HuskJITRequest) -> HuskJITRequest.Response {
         let manager = FileManager.default
@@ -58,7 +58,7 @@ private enum HuskJITWork {
                       let scriptBase64 = request.scriptBase64, !scriptBase64.isEmpty else {
                     throw NSError(domain: "HuskJITHelper", code: 2,
                                   userInfo: [NSLocalizedDescriptionKey:
-                                    "The target process or Husk's JIT script was not provided."])
+                                    "The target process or DroidRun's JIT script was not provided."])
                 }
                 try StikJIT.enableJIT(
                     targetPID: targetPID,
@@ -69,7 +69,7 @@ private enum HuskJITWork {
                     forceScript: true,
                     preparationProgress: { NSLog("[HuskJIT] prepare: %@", String(describing: $0)) },
                     progress: { NSLog("[HuskJIT] %@", $0) })
-                return .init(success: true, message: "Husk detached cleanly from its built-in JIT helper.",
+                return .init(success: true, message: "DroidRun detached cleanly from its built-in JIT helper.",
                              txmPresent: StikJIT.isTXMPresent)
             case .resetDDI:
                 preconditionFailure("Handled above")
@@ -83,7 +83,7 @@ private enum HuskJITWork {
 
 /// NSExtensionPrincipalClass (Info.plist). The request arrives as JSON in the
 /// first input item; the response goes back as JSON in the item the request
-/// completes with. Enable completes only once Husk's script has detached, so
+/// completes with. Enable completes only once DroidRun's script has detached, so
 /// the request, and this process, last as long as the debugger does.
 @objc(HuskJITHelperHandler)
 final class HuskJITHelperHandler: NSObject, NSExtensionRequestHandling {
@@ -95,7 +95,7 @@ final class HuskJITHelperHandler: NSObject, NSExtensionRequestHandling {
             if let data, let request = try? JSONDecoder().decode(HuskJITRequest.self, from: data) {
                 response = HuskJITWork.handle(request)
             } else {
-                response = .init(success: false, message: "Husk's JIT helper received no request.",
+                response = .init(success: false, message: "DroidRun's JIT helper received no request.",
                                  txmPresent: nil)
             }
             let item = NSExtensionItem()

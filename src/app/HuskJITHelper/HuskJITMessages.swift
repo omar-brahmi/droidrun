@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import Foundation
 
-/// Codable messages shared by Husk and its JIT helper extension. Compiled into
+/// Codable messages shared by DroidRun and its JIT helper extension. Compiled into
 /// both targets. Each travels as JSON in an extension request's item
 /// (userInfo[itemKey]), to the helper and back.
 struct HuskJITRequest: Codable, Sendable {

@@ -5,11 +5,11 @@ import SwiftUI
 /// Gameplay pictures for apps that have been run on an iPhone, kept on GitHub rather than in the app.
 ///
 /// The repository's `showcase/` folder holds `<package>_screenshot<N>.jpg` files and an `index.json` listing each with its
-/// SHA-256 (`scripts/update_showcase_index.py` writes it). On every launch, and whenever an app is added, Husk reads the
-/// index and fetches the pictures for the apps this person actually has -- nothing for anything else. A picture Husk has
+/// SHA-256 (`scripts/update_showcase_index.py` writes it). On every launch, and whenever an app is added, DroidRun reads the
+/// index and fetches the pictures for the apps this person actually has -- nothing for anything else. A picture DroidRun has
 /// never had is fetched straight away. One it already has that has changed upstream is not replaced behind anyone's back:
-/// Husk asks first. Every download is checked against its checksum before it is kept, so a cut-off or wrong file is never
-/// shown. New pictures go up by pushing to the repository, with no release of Husk.
+/// DroidRun asks first. Every download is checked against its checksum before it is kept, so a cut-off or wrong file is never
+/// shown. New pictures go up by pushing to the repository, with no release of DroidRun.
 @MainActor
 final class ShowcaseStore: ObservableObject {
     static let shared = ShowcaseStore()
@@ -24,7 +24,7 @@ final class ShowcaseStore: ObservableObject {
     private struct Entry: Codable { let file: String; let sha256: String; let size: Int? }
     private struct Index: Codable { let format: Int; let apps: [String: [Entry]] }
 
-    /// What Husk has on disk: file name -> checksum.
+    /// What DroidRun has on disk: file name -> checksum.
     private var have: [String: String] = [:]
     private var index: Index?
     private var checking = false

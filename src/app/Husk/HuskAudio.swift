@@ -43,7 +43,7 @@ final class HuskAudio {
             // ever saw them. Every log line said audio was working.
             //
             // .playback plays through the silent switch, which is what a game
-            // running inside Husk expects. .mixWithOthers keeps the original
+            // running inside DroidRun expects. .mixWithOthers keeps the original
             // intent: it will not stop the user's music or take over a call.
             try session.setCategory(.playback, mode: .default,
                                     options: [.mixWithOthers])

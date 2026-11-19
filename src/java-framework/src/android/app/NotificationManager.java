@@ -6,7 +6,7 @@ public class NotificationManager {
     private final java.util.HashMap<String, NotificationChannel> mChannels = new java.util.HashMap<>();
     private final java.util.HashMap<String, NotificationChannelGroup> mGroups = new java.util.HashMap<>();
     public void notify(int id, Notification n) { notify(null, id, n); }
-    public void notify(String tag, int id, Notification n) { android.util.Log.i("Husk", "notification " + id + ": " + (n != null ? n.huskText() : "")); }
+    public void notify(String tag, int id, Notification n) { android.util.Log.i("DroidRun", "notification " + id + ": " + (n != null ? n.huskText() : "")); }
     public void cancel(int id) {} public void cancel(String tag, int id) {} public void cancelAll() {}
     public void createNotificationChannel(NotificationChannel c) { mChannels.put(c.getId(), c); }
     public void createNotificationChannels(java.util.List<NotificationChannel> l) { for (NotificationChannel c : l) createNotificationChannel(c); }

@@ -323,7 +323,7 @@ static void InstallSource_zero(tl_jcall *c) { c->ret = vi(0); }
 static void Global_getString(tl_jcall *c)
 {
     const char *k = S(c->args[1].l);
-    c->ret = vl(STR(!strcmp(k, "device_name") ? "Husk" : ""));
+    c->ret = vl(STR(!strcmp(k, "device_name") ? "DroidRun" : ""));
 }
 
 /*

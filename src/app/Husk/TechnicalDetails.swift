@@ -2,9 +2,9 @@
 import SwiftUI
 
 extension TLReport {
-    /// Whether Husk will try to run it at all. A game with an engine Husk has a driver for runs on the native runtime; one
-    /// without (Flappy Bird is plain Java with a couple of AndroidX helper libraries) runs on Husk's own Java interpreter.
-    /// Only an APK with no ARM code, or one Husk could not read, is out of reach.
+    /// Whether DroidRun will try to run it at all. A game with an engine DroidRun has a driver for runs on the native runtime; one
+    /// without (Flappy Bird is plain Java with a couple of AndroidX helper libraries) runs on DroidRun's own Java interpreter.
+    /// Only an APK with no ARM code, or one DroidRun could not read, is out of reach.
     var canRun: Bool {
         runsOnNativeRuntime || webKind != nil || ["java", "native", "nativeWithWork"].contains(verdict)
     }
@@ -13,7 +13,7 @@ extension TLReport {
     var runnerName: String {
         if runsOnNativeRuntime { return nativeEngineName }
         if let web = webKind { return "\(web.name) (web app)" }
-        return canRun ? "Java (Husk's interpreter)" : "None"
+        return canRun ? "Java (DroidRun's interpreter)" : "None"
     }
 }
 
@@ -39,7 +39,7 @@ extension TLApp {
     }
 }
 
-/// What a game is, technically: how Husk runs it, what is in the APK, how its native libraries load, and its last run's log.
+/// What a game is, technically: how DroidRun runs it, what is in the APK, how its native libraries load, and its last run's log.
 struct TLTechnicalView: View {
     let app: TLApp
 
@@ -89,7 +89,7 @@ struct TLTechnicalView: View {
                 } header: {
                     Text("Native Libraries (\(arm64.count))")
                 } footer: {
-                    Text("How each 64-bit library maps onto the iPhone: its relocations, the instructions Husk rewrites, and anything the loader works around.")
+                    Text("How each 64-bit library maps onto the iPhone: its relocations, the instructions DroidRun rewrites, and anything the loader works around.")
                 }
             }
 

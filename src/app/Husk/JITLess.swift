@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import Foundation
 
-/// Husk 3.2's experimental JIT-less mode. An Android game's libraries run from Mach-O dylibs made from them ahead of time, with the
+/// DroidRun 3.2's experimental JIT-less mode. An Android game's libraries run from Mach-O dylibs made from them ahead of time, with the
 /// translation layer's code rewrites already applied, and signed: iOS maps signed code as executable on its own, so the game needs
 /// no JIT -- no debugger, no StikJIT. The dylibs come from two places: the app's Frameworks (aot-<hash>-<library>.dylib, made on
-/// the Mac and signed with the app by the installer), and a folder of the app's own where Husk converts a game's libraries before
+/// the Mac and signed with the app by the installer), and a folder of the app's own where DroidRun converts a game's libraries before
 /// its first JIT-less start and signs them with the user's developer certificate (SigningCertificate). An engine that generates
 /// code at run time (Geode's mods, a Mono or LuaJIT JIT) still needs JIT.
 enum JITLess {
@@ -50,7 +50,7 @@ enum JITLess {
 
     /// Before a game's JIT-less start: its libraries converted and signed (once; again only when the certificate changes). With no
     /// certificate imported, only prebuilt dylibs can be used, and this does nothing.
-    /// The Java runtime's own native libraries (libjavacore, libopenjdk, ICU, conscrypt...), which apps on Husk's Java runtime load
+    /// The Java runtime's own native libraries (libjavacore, libopenjdk, ICU, conscrypt...), which apps on DroidRun's Java runtime load
     /// from the app bundle: converted on the device like a game's, once.
     static var runtimeLibraries: [String] {
         guard let root = Bundle.main.resourcePath.map({ $0 + "/java-runtime" }),
@@ -63,15 +63,15 @@ enum JITLess {
     static func prepare(apks: [String], progress: @escaping @Sendable (String) -> Void) async throws {
         guard enabled, let cred = SigningCertificate.credentials() else { return }
         let apks = apks + runtimeLibraries
-        // The certificates above the developer certificate, for iOS to trust the signatures: from Husk's own signature, which the
+        // The certificates above the developer certificate, for iOS to trust the signatures: from DroidRun's own signature, which the
         // store made with the same certificate and its whole chain (a store's .p12 holds the developer certificate alone).
         if !chainLoaded, let exe = Bundle.main.executablePath {
             chainLoaded = true
-            HuskLog.log("sign", "certificate chain from Husk's own signature: \(husk_codesign_chain_from_executable(exe)) certificates")
+            HuskLog.log("sign", "certificate chain from DroidRun's own signature: \(husk_codesign_chain_from_executable(exe)) certificates")
         }
         // The signer revision and the running app's bundle ID are part of the tag: libraries signed by an older signer, or
         // under another install's identifier (SideStore appends the team, a TrollStore/enterprise install may not), are signed again.
-        let ident = Bundle.main.bundleIdentifier ?? "com.husk.app"
+        let ident = Bundle.main.bundleIdentifier ?? "com.droidrun.app"
         let tag = cred.tag + "-s15-" + ident
         let dir = cacheDirectory.path
         try await Task.detached(priority: .userInitiated) { [ident] in

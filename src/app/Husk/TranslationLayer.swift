@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// Android apps without booting Android.
 ///
-/// Husk runs an APK in one of two ways. It can boot a whole Android system under QEMU and show one app's surface:
+/// DroidRun runs an APK in one of two ways. It can boot a whole Android system under QEMU and show one app's surface:
 /// that runs anything, and costs a kernel, an init, a system server and minutes of emulated CPU before the first frame.
 /// Or -- this -- it can keep only the app's own code, its Dex and its native libraries, and run it against a rewrite of the
 /// Android framework on the phone itself, so there is nothing to boot. Games built on Unity, cocos2d-x, Minecraft's
@@ -55,7 +55,7 @@ extension TLReport {
         guard ok else { return nil }
         // Native code for other CPUs only (x86, MIPS): nothing here can run it. 32-bit ARM is translated.
         if !abis.isEmpty && !abis.contains("arm64-v8a") && !abis.contains("armeabi-v7a") && !abis.contains("armeabi") { return nil }
-        // An app with Java code and no native code at all runs on Husk's own Java runtime
+        // An app with Java code and no native code at all runs on DroidRun's own Java runtime
         if abis.isEmpty { return dexCount > 0 && webKind == nil ? .java : nil }
         // Unity 6 runs through its own Java activity (UnityPlayerForActivityOrService), on the Java runtime
         if engine == "Unity 6" { return .java }
@@ -97,12 +97,12 @@ extension TLReport {
         let flagged = libraries.filter { ($0.abi == "arm64-v8a" || $0.abi == "armeabi-v7a" || $0.abi == "armeabi") && $0.status != "ok" }.count
         let total = libraries.filter { $0.abi == "arm64-v8a" || $0.abi == "armeabi-v7a" || $0.abi == "armeabi" }.count
         var text = nativeEngine == .flutter
-            ? "A Flutter app. Its engine and its compiled Dart run natively through Husk's translation layer, which loads its \(total) arm64 libraries itself."
+            ? "A Flutter app. Its engine and its compiled Dart run natively through DroidRun's translation layer, which loads its \(total) arm64 libraries itself."
             : nativeEngine == .java && engine != "libGDX"
-            ? "An Android app. Husk runs its code on its own Java runtime" + (total > 0 ? " and loads its \(total) arm64 libraries itself." : ".")
-            : "A \(nativeEngineName) game. It runs through Husk's native runtime, which loads its \(total) arm64 libraries itself."
-        if nativeEngine == .cocos || nativeEngine == .minecraft || nativeEngine == .ue4 || nativeEngine == .gta { text += " It is a landscape game: Husk turns the screen for it." }
-        else if nativeEngine == .sdl || nativeEngine == .nativeactivity || nativeEngine == .godot || nativeEngine == .gamemaker { text += " Husk turns the screen the way the game asks for." }
+            ? "An Android app. DroidRun runs its code on its own Java runtime" + (total > 0 ? " and loads its \(total) arm64 libraries itself." : ".")
+            : "A \(nativeEngineName) game. It runs through DroidRun's native runtime, which loads its \(total) arm64 libraries itself."
+        if nativeEngine == .cocos || nativeEngine == .minecraft || nativeEngine == .ue4 || nativeEngine == .gta { text += " It is a landscape game: DroidRun turns the screen for it." }
+        else if nativeEngine == .sdl || nativeEngine == .nativeactivity || nativeEngine == .godot || nativeEngine == .gamemaker { text += " DroidRun turns the screen the way the game asks for." }
         if flagged > 0 {
             text += " \(flagged) of them use tricks the older loader could not handle; the native runtime handles those too, "
                   + "except for optional anti-tamper code, which it leaves out."
@@ -158,7 +158,7 @@ struct TLApp: Identifiable {
     var iconPath: String?
     var apks: [String]
     var report: TLReport?
-    /// When it was last started from Husk.
+    /// When it was last started from DroidRun.
     var lastPlayed: Date? = nil
     /// Its Android package name, once read from the APK.
     var packageName: String? = nil
@@ -184,7 +184,7 @@ final class TranslationLayerStore: ObservableObject {
 
     private init() { reload() }
 
-    /// Which reading of an app's libraries its report came from. A newer Husk that recognises more (an engine, a kind of game) reads
+    /// Which reading of an app's libraries its report came from. A newer DroidRun that recognises more (an engine, a kind of game) reads
     /// the apps it already holds again, so they are not left with what the old one knew.
     nonisolated static let scanVersion = 8
     private var rescanning = false
@@ -210,7 +210,7 @@ final class TranslationLayerStore: ObservableObject {
         }
     }
 
-    /// Icons are drawn again once per run of Husk at most: a newly added app already has the current kind.
+    /// Icons are drawn again once per run of DroidRun at most: a newly added app already has the current kind.
     private var iconsRefreshed = false
 
     nonisolated private static func scanStamp(_ id: String) -> Int {
@@ -268,7 +268,7 @@ final class TranslationLayerStore: ObservableObject {
     /// Keep a copy of one app -- one APK, or a base APK and its splits,
     /// picked together -- and report on it.
     /// One app's APKs (a base and its splits, or a bundle) copied in (the originals stay where they are), and the new app's folder name: the developer mass test takes its APKs
-    /// from a folder of the user's this way, one per launch of Husk.
+    /// from a folder of the user's this way, one per launch of DroidRun.
     nonisolated static func importCopy(_ urls: [URL]) -> String? {
         let fm = FileManager.default
         let before = Set((try? fm.contentsOfDirectory(atPath: TranslationLayer.root.path)) ?? [])
@@ -292,7 +292,7 @@ final class TranslationLayerStore: ObservableObject {
         }
     }
 
-    /// APKs put straight into Husk's folder (Files > On My iPhone > Husk, which the app shares) are taken in as apps, one each, and
+    /// APKs put straight into DroidRun's folder (Files > On My iPhone > DroidRun, which the app shares) are taken in as apps, one each, and
     /// moved rather than copied, so a big one costs no second copy's worth of storage. This is the way in that needs no file picker.
     func adoptDroppedAPKs() {
         guard busy == nil, let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
@@ -300,7 +300,7 @@ final class TranslationLayerStore: ObservableObject {
                                                                       options: [.skipsHiddenFiles])) ?? [])
             .filter { $0.pathExtension.lowercased() == "apk" || BundleUnpacker.extensions.contains($0.pathExtension.lowercased()) }
         guard let first = dropped.first else { return }
-        HuskLog.log("tl", "adopting \(dropped.count) APK(s) found in the Husk folder")
+        HuskLog.log("tl", "adopting \(dropped.count) APK(s) found in the DroidRun folder")
         add([first], move: true)
     }
 
@@ -398,7 +398,7 @@ final class TranslationLayerStore: ObservableObject {
         } catch {
             try? fm.removeItem(at: dir)
             HuskLog.log("tl", "FAILED to add: \(error.localizedDescription)")
-            return "Husk could not copy it: \(error.localizedDescription)"
+            return "DroidRun could not copy it: \(error.localizedDescription)"
         }
 
         let apks = orderedAPKs(((try? fm.contentsOfDirectory(atPath: dir.path)) ?? [])
@@ -415,7 +415,7 @@ final class TranslationLayerStore: ObservableObject {
     /// The app's own name and icon, from its manifest and resource table --
     /// the same reading the library does for apps inside Android, done here on
     /// the file directly.
-    /// Which way of drawing icons an app's icon.png came from. A newer Husk that draws them better draws the apps it
+    /// Which way of drawing icons an app's icon.png came from. A newer DroidRun that draws them better draws the apps it
     /// already holds again (icons only: the name may be the user's own).
     nonisolated static let iconVersion = 3
 
@@ -493,7 +493,7 @@ final class TranslationLayerStore: ObservableObject {
         }
     }
 
-    /// Draw the icons of apps added by an older Husk again, the current way.
+    /// Draw the icons of apps added by an older DroidRun again, the current way.
     nonisolated static func refreshIcon(_ app: TLApp) {
         let dir = TranslationLayer.root.appendingPathComponent(app.id, isDirectory: true)
         let stamp = (try? String(contentsOf: dir.appendingPathComponent("icon-version.txt"), encoding: .utf8))
@@ -585,7 +585,7 @@ struct TLChecksView: View {
         } header: {
             Text("Where it stands")
         } footer: {
-            Text("The plan, in order, is docs/04-translation-layer.md in Husk's source.")
+            Text("The plan, in order, is docs/04-translation-layer.md in DroidRun's source.")
         }
     }
 }
@@ -752,7 +752,7 @@ struct TLAttemptView: View {
     }
 }
 
-/// A game Husk runs on its own Java interpreter (Flappy Bird): full screen like every other game, with the same bar, the
+/// A game DroidRun runs on its own Java interpreter (Flappy Bird): full screen like every other game, with the same bar, the
 /// same three-finger way to hide it, and the game's own settings.
 struct TLClassicAttemptView: View {
     let app: TLApp

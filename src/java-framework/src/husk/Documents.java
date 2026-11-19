@@ -50,7 +50,7 @@ public final class Documents extends ContentProvider {
         if (extra != null) for (String t : extra) { if (types.length() > 0) types.append(','); types.append(t); }
         if (types.length() == 0) types.append(i.getType() != null ? i.getType() : "*/*");
         boolean multiple = i.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false);
-        android.util.Log.d("Husk", "file picker for " + types + (multiple ? " (several)" : ""));
+        android.util.Log.d("DroidRun", "file picker for " + types + (multiple ? " (several)" : ""));
         Native.pickDocuments(types.toString(), multiple);
     }
 

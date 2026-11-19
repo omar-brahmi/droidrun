@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import Foundation
 
-/// A PS4 game Husk can run: an extracted game folder (eboot.bin and sce_sys/) under Documents/PS4 Games, used where it is.
+/// A PS4 game DroidRun can run: an extracted game folder (eboot.bin and sce_sys/) under Documents/PS4 Games, used where it is.
 /// Nothing is copied; a folder named like CUSA07023-UPDATE beside it is the game's patch, which the PS4 layer picks up itself.
 struct PS4Game: Identifiable, Hashable {
     let titleID: String          // CUSA07023
@@ -10,13 +10,13 @@ struct PS4Game: Identifiable, Hashable {
     let folder: URL
 
     var id: String { titleID }
-    /// The library and Close Husk to Play key: one namespace with the Android games' ids.
+    /// The library and Close DroidRun to Play key: one namespace with the Android games' ids.
     var libraryID: String { "ps4:" + titleID }
     var eboot: URL { folder.appendingPathComponent("eboot.bin") }
     var iconPath: String? { existing("sce_sys/icon0.png") }
     var artPath: String? { existing("sce_sys/pic1.png") ?? existing("sce_sys/pic0.png") }
 
-    /// Husk's own files for the game: its log, when it was last played.
+    /// DroidRun's own files for the game: its log, when it was last played.
     var dataDir: URL { TranslationLayer.root.appendingPathComponent("ps4-" + titleID) }
 
     var lastPlayed: Date? {

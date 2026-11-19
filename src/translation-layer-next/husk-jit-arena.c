@@ -87,7 +87,7 @@ bool husk_jit_arena_open(size_t region_bytes, size_t ceiling_bytes, char *err, s
     arena_dual_mapping *(*get)(void) = (arena_dual_mapping *(*)(void))dlsym(RTLD_DEFAULT, "husk_ios_jit_get_mapping");
     arena_dual_mapping *m = get ? get() : NULL;
     if (!m || !m->rw_addr || !m->rx_addr || !m->size) {
-        snprintf(err, errlen, "no JIT region: Husk was not given one by StikDebug at launch");
+        snprintf(err, errlen, "no JIT region: DroidRun was not given one by StikDebug at launch");
         return false;
     }
     if (!husk_jit_arena_open_region(m->rw_addr, m->rx_addr, m->size & ~(HUSK_JIT_ARENA_PAGE - 1), ceiling_bytes)) {

@@ -228,7 +228,7 @@ static void check_tpidr(tl_json *j)
 
     if (in_use) {
         result(j, "tpidr", title, "fail",
-               "Already in use: it holds 0x%llx before Husk touches it, so the system "
+               "Already in use: it holds 0x%llx before DroidRun touches it, so the system "
                "owns it. Android code reads its stack guard from it; the guard would "
                "have to live wherever it points, or every read be rewritten.",
                (unsigned long long)in_use);

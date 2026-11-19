@@ -8,8 +8,13 @@ OUT="${1:-$HERE/../../build/husk-framework.dex}"
 TMP="$(mktemp -d)"
 python3 "$HERE/gen/gles20.py" "$HERE/src/android/opengl" "$HERE/../translation-layer-next/husk-tl-dvm-gles20.c" >/dev/null
 # libcore's own classes that javac's JDK does not have (org.xmlpull): compiled to build against, not put in the dex
-"$JDK/bin/javac" -nowarn --release 8 -encoding UTF-8 -d "$TMP/stubs" $(find "$HERE/stubs" -name '*.java')
-if ! "$JDK/bin/javac" -nowarn --release 8 -encoding UTF-8 -Xmaxerrs 100000 -cp "$TMP/stubs" -d "$TMP/classes" $(find "$HERE/src" "$HERE/gen-src" -name '*.java') 2> "$TMP/javac.log"; then
+# The source lists go to javac as @argfiles: on Windows (Git Bash) thousands of paths overflow the command line.
+# Paths in them are relative to $HERE, where javac runs; cygpath gives javac.exe a path it can open.
+(cd "$HERE" && find stubs -name '*.java') > "$TMP/stubs.txt"
+(cd "$HERE" && find src gen-src -name '*.java') > "$TMP/sources.txt"
+argfile() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else echo "$1"; fi; }
+(cd "$HERE" && "$JDK/bin/javac" -nowarn --release 8 -encoding UTF-8 -d "$TMP/stubs" @"$(argfile "$TMP/stubs.txt")")
+if ! (cd "$HERE" && "$JDK/bin/javac" -nowarn --release 8 -encoding UTF-8 -Xmaxerrs 100000 -cp "$TMP/stubs" -d "$TMP/classes" @"$(argfile "$TMP/sources.txt")") 2> "$TMP/javac.log"; then
     grep -v "^Note:" "$TMP/javac.log" > "${JAVAC_LOG:-/dev/stderr}"; echo "javac failed" >&2; exit 1
 fi
 (cd "$TMP/classes" && "$JDK/bin/jar" cf "$TMP/classes.jar" .)

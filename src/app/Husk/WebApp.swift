@@ -7,12 +7,12 @@ import UIKit
 #endif
 
 /// Web apps: Capacitor, Cordova and Ionic (which is one of the two underneath). The app is HTML, CSS and JavaScript in a WebView,
-/// plus a bridge to native plugins; Android's WebView is Chromium, here it is WebKit, and Husk answers the bridge itself.
+/// plus a bridge to native plugins; Android's WebView is Chromium, here it is WebKit, and DroidRun answers the bridge itself.
 ///
 /// - The APK's web folder (assets/public for Capacitor, assets/www for Cordova) is copied out once and served from a scheme of its
 ///   own, one origin per app (capacitor://<package>/), so each app keeps its own storage, cookies and service workers.
-/// - Capacitor: the same native-bridge.js the app ships for Android is injected, with `window.androidBridge` posting to Husk, so
-///   the app believes it is on Android. Husk declares the plugins it answers (PluginHeaders); every other plugin falls back to its
+/// - Capacitor: the same native-bridge.js the app ships for Android is injected, with `window.androidBridge` posting to DroidRun, so
+///   the app believes it is on Android. DroidRun declares the plugins it answers (PluginHeaders); every other plugin falls back to its
 ///   web implementation, as it would in a browser.
 /// - Cordova: cordova-android's prompt() bridge (gap:, gap_init:), answered in WKUIDelegate's prompt panel, and results returned
 ///   through cordova.callbackFromNative.
@@ -143,7 +143,7 @@ final class WebAppRuntime: NSObject {
     // MARK: the bridge script
 
     private func bootScript() -> String {
-        // The page's errors, in Husk's log: what a web app that shows nothing needs looked at first.
+        // The page's errors, in DroidRun's log: what a web app that shows nothing needs looked at first.
         let errors = """
         window.addEventListener('error', function (e) { try { window.webkit.messageHandlers.huskLog.postMessage('error: ' + e.message + ' at ' + (e.filename || '') + ':' + (e.lineno || 0) + ':' + (e.colno || 0) + ' ' + (e.error && e.error.stack || '')); } catch (x) {} });
         window.addEventListener('unhandledrejection', function (e) { try { window.webkit.messageHandlers.huskLog.postMessage('unhandled rejection: ' + (e.reason && (e.reason.message || e.reason))); } catch (x) {} });
@@ -245,7 +245,7 @@ final class WebAppRuntime: NSObject {
         case ("StatusBar", _), ("SplashScreen", _), ("Keyboard", _):
             ok()
         default:
-            fail("\(plugin).\(method) is not implemented in Husk")
+            fail("\(plugin).\(method) is not implemented in DroidRun")
         }
     }
 
@@ -355,7 +355,7 @@ final class WebAppRuntime: NSObject {
         return true
     }
 
-    // MARK: from Husk
+    // MARK: from DroidRun
 
     /// Android's back button: the app's own handler when it has one, the page history otherwise, and closing on the first page.
     func back() {

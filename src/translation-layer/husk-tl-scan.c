@@ -394,7 +394,7 @@ char *husk_tl_scan(const char *const *paths, int count)
         snprintf(summary, sizeof(summary), "This is not an app: it has no manifest and no code.");
     } else if (eng.capacitor || eng.cordova) {
         verdict = "web";
-        snprintf(summary, sizeof(summary), "A %s web app: its pages and scripts run in Safari's engine, with Husk answering "
+        snprintf(summary, sizeof(summary), "A %s web app: its pages and scripts run in Safari's engine, with DroidRun answering "
                  "the plugins it calls.", eng.capacitor ? "Capacitor" : "Cordova");
     } else if (!any_native) {
         verdict = "java";
@@ -403,7 +403,7 @@ char *husk_tl_scan(const char *const *paths, int count)
     } else if (abis[ABI_ARM64] && arm64_trouble > 0 && engine_name(&eng) && !strncmp(engine_name(&eng), "Unity", 5)) {
         /* The native runtime (src/translation-layer-next) handles what the per-library check flags. */
         verdict = "native";
-        snprintf(summary, sizeof(summary), "A Unity game: Husk's native runtime loads its %d arm64 libraries itself, "
+        snprintf(summary, sizeof(summary), "A Unity game: DroidRun's native runtime loads its %d arm64 libraries itself, "
                  "including the %d that use tricks the older loader could not handle.", arm64_libs, arm64_trouble);
     } else if (abis[ABI_ARM64] && arm64_trouble == 0) {
         verdict = "native";
@@ -416,7 +416,7 @@ char *husk_tl_scan(const char *const *paths, int count)
                  arm64_libs == 1 ? "y" : "ies", arm64_trouble == 1 ? "s" : "");
     } else if (abis[1] || abis[2]) {
         verdict = "native";
-        snprintf(summary, sizeof(summary), "32-bit ARM native code. Husk translates it "
+        snprintf(summary, sizeof(summary), "32-bit ARM native code. DroidRun translates it "
                  "to arm64 the same way it loads arm64 libraries.");
     } else {
         verdict = "noArm64";

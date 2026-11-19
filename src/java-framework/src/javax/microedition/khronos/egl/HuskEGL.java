@@ -126,7 +126,7 @@ final class HuskEGL implements EGL11 {
         return husk.EGLNative.swap(su.handle, ch, x, y, w, h);
     }
     public int eglGetError() { Integer e = sError.get(); sError.set(EGL_SUCCESS); return e == null ? EGL_SUCCESS : e; }
-    public String eglQueryString(EGLDisplay d, int name) { return name == EGL_VENDOR ? "Husk" : name == EGL_VERSION ? "1.4 Husk" : name == EGL_EXTENSIONS ? "EGL_KHR_surfaceless_context EGL_KHR_create_context" : ""; }
+    public String eglQueryString(EGLDisplay d, int name) { return name == EGL_VENDOR ? "DroidRun" : name == EGL_VERSION ? "1.4 DroidRun" : name == EGL_EXTENSIONS ? "EGL_KHR_surfaceless_context EGL_KHR_create_context" : ""; }
     public boolean eglQuerySurface(EGLDisplay d, EGLSurface s, int attr, int[] value) {
         int w = husk.Native.screenWidth(), h = husk.Native.screenHeight();
         if (s instanceof Surface && ((Surface) s).handle != 0) { w = ((Surface) s).w; h = ((Surface) s).h; }

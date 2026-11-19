@@ -51,7 +51,7 @@ public final class AppRunner {
             sAdopted = swapped;
             Native.setAppClassLoader(swapped);
             Thread.currentThread().setContextClassLoader(swapped);
-            android.util.Log.d("Husk", "the app installed a class loader of its own: " + swapped);
+            android.util.Log.d("DroidRun", "the app installed a class loader of its own: " + swapped);
         }
         return swapped;
     }
@@ -67,7 +67,7 @@ public final class AppRunner {
                     .newInstance(path.toString(), android.content.pm.ApplicationInfo.self().nativeLibraryDir, AppRunner.class.getClassLoader());
             Native.setAppClassLoader(sLoader);
             Thread.currentThread().setContextClassLoader(sLoader);
-        } catch (Throwable t) { android.util.Log.w("Husk", "the app's class loader: " + t); }
+        } catch (Throwable t) { android.util.Log.w("DroidRun", "the app's class loader: " + t); }
     }
 
     /** android:appComponentFactory, as LoadedApk uses it: it may replace the class loader, then makes the app's components.
@@ -86,10 +86,10 @@ public final class AppRunner {
                 sLoader = cl;
                 Native.setAppClassLoader(cl);
                 Thread.currentThread().setContextClassLoader(cl);
-                android.util.Log.d("Husk", "component factory " + f + " gave the app a class loader of its own");
+                android.util.Log.d("DroidRun", "component factory " + f + " gave the app a class loader of its own");
             }
         } catch (Throwable t) {
-            android.util.Log.w("Husk", "component factory " + f + " did not start: " + t);
+            android.util.Log.w("DroidRun", "component factory " + f + " did not start: " + t);
             sFactory = android.app.AppComponentFactory.DEFAULT;
         }
     }
@@ -114,7 +114,7 @@ public final class AppRunner {
             if (appCls != null && usesFactory()) app = sFactory.instantiateApplication(classLoader(), appCls);
             else app = appCls != null ? (Application) Class.forName(appCls, true, classLoader()).newInstance() : new Application();
         }
-        catch (ClassNotFoundException e) { android.util.Log.w("Husk", "no application class " + appCls); app = new Application(); }
+        catch (ClassNotFoundException e) { android.util.Log.w("DroidRun", "no application class " + appCls); app = new Application(); }
         sApp = app;
         android.app.ActivityThread.huskBind(app);
         Application.huskSet(app);
@@ -150,7 +150,7 @@ public final class AppRunner {
             else if (usesFactory()) app = sFactory.instantiateApplication(loader, cls);
             else app = (Application) Class.forName(cls, true, loader).newInstance();
         } catch (Throwable t) {
-            android.util.Log.w("Husk", "makeApplication " + cls + ": " + t);
+            android.util.Log.w("DroidRun", "makeApplication " + cls + ": " + t);
             app = new Application();
         }
         if (app.getBaseContext() == null) app.huskAttach(ContextImpl.app());
@@ -180,7 +180,7 @@ public final class AppRunner {
                 cp.attachInfo(app, info);
                 ContentResolver.register(p.authorities, cp);
             } catch (Throwable t) {
-                android.util.Log.w("Husk", "content provider " + p.name + " did not start: " + t);
+                android.util.Log.w("DroidRun", "content provider " + p.name + " did not start: " + t);
             }
         }
     }
@@ -193,7 +193,7 @@ public final class AppRunner {
         return Native.packageName();
     }
     static Activity launch(String cls, Intent intent, Activity caller, int request, Manifest.Component info) throws Exception {
-        android.util.Log.d("Husk", "launch " + cls);
+        android.util.Log.d("DroidRun", "launch " + cls);
         Activity prev = top();
         Activity a = usesFactory() ? sFactory.instantiateActivity(classLoader(), cls, intent) : (Activity) Class.forName(cls, true, classLoader()).newInstance();
         ContextImpl base = ContextImpl.forActivity();
@@ -217,7 +217,7 @@ public final class AppRunner {
     /** Context.startActivity: an activity of the app's own, or something the host can open (a web page, mail, the store). */
     public static void startActivity(Context from, Intent i, int request, Bundle opts) {
         Manifest.Component c = Manifest.resolve(i);
-        android.util.Log.d("Husk", "startActivity " + i + (c != null ? " -> " + c.name : " (not an activity of this app)"));
+        android.util.Log.d("DroidRun", "startActivity " + i + (c != null ? " -> " + c.name : " (not an activity of this app)"));
         if (c != null) {
             final Activity caller = from instanceof Activity ? (Activity) from : top();
             final Intent intent = new Intent(i);
@@ -241,7 +241,7 @@ public final class AppRunner {
                     // an <activity-alias> starts the activity it names; the intent keeps the alias as its component, as on Android
                     launch("activity-alias".equals(c.kind) && c.parentActivity != null ? c.parentActivity : c.name, intent, caller, request, c);
                 } catch (Throwable t) {
-                    android.util.Log.e("Husk", "starting " + c.name + " failed", t);
+                    android.util.Log.e("DroidRun", "starting " + c.name + " failed", t);
                     if (t instanceof RuntimeException) throw (RuntimeException) t;
                     throw new RuntimeException(t);
                 }
@@ -285,7 +285,7 @@ public final class AppRunner {
     /** Activity.finish: the one below comes back (with the result when it asked for one). */
     public static void finish(Activity a) { sHandler.post(() -> finishNow(a, true)); }
     private static void finishNow(Activity a, boolean resumeBelow) {
-        android.util.Log.d("Husk", "finish " + a.getClass().getName());
+        android.util.Log.d("DroidRun", "finish " + a.getClass().getName());
         int idx = sStack.indexOf(a);
         if (idx < 0) return;
         boolean wasTop = idx == sStack.size() - 1;
@@ -349,7 +349,7 @@ public final class AppRunner {
                 }
                 touch(phase, id, x, y);
             } catch (RuntimeException e) {
-                android.util.Log.e("Husk", "input threw", e);
+                android.util.Log.e("DroidRun", "input threw", e);
                 throw e;
             }
         }

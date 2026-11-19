@@ -15,10 +15,10 @@ import ActivityKit
 /// in the served folder, which is where games that keep their data on /sdcard look for it.
 ///
 /// Two ways to move the bytes:
-///   - while Husk runs (in front, or kept running in the background by an iOS 26 continued processing task) it downloads itself,
+///   - while DroidRun runs (in front, or kept running in the background by an iOS 26 continued processing task) it downloads itself,
 ///     several files at once, which is much faster than iOS's download service gives a background session;
-///   - when Husk leaves the screen without that task, what is left of each file is handed to a background URLSession, which iOS
-///     carries on with while Husk is suspended or closed. Those tasks are made while Husk is still active, or iOS would treat them as
+///   - when DroidRun leaves the screen without that task, what is left of each file is handed to a background URLSession, which iOS
+///     carries on with while DroidRun is suspended or closed. Those tasks are made while DroidRun is still active, or iOS would treat them as
 ///     work to do whenever it suits it.
 @MainActor
 final class Downloads: ObservableObject {
@@ -55,10 +55,10 @@ final class Downloads: ObservableObject {
     /// Bytes per second across everything running, smoothed.
     @Published private(set) var speed: Double = 0
     @Published var problem: String?
-    /// Live Activities are turned off for Husk in Settings, so a download cannot show on the Lock Screen or in the Dynamic Island.
+    /// Live Activities are turned off for DroidRun in Settings, so a download cannot show on the Lock Screen or in the Dynamic Island.
     @Published var liveActivitiesOff = false
 
-    nonisolated static let sessionID = "com.husk.downloads"
+    nonisolated static let sessionID = "com.droidrun.downloads"
     /// How many files at once.
     private static let parallel = 4
 
@@ -66,14 +66,14 @@ final class Downloads: ObservableObject {
     private let backgroundDelegate = BackgroundDownloadDelegate()
     private let direct: URLSession
     private let directDelegate = DirectDownloadDelegate()
-    /// Files being fetched by Husk itself, and files handed to the background session ("job|path").
+    /// Files being fetched by DroidRun itself, and files handed to the background session ("job|path").
     private var directRunning: [String: URLSessionDataTask] = [:]
     private var handedOff: Set<String> = []
-    /// Husk can download itself: it is on screen, or a continued processing task keeps it running.
+    /// DroidRun can download itself: it is on screen, or a continued processing task keeps it running.
     private var awake = true
     private var grace: UIBackgroundTaskIdentifier = .invalid
     private var retries: [String: Int] = [:]
-    /// From the app delegate, when iOS woke Husk for the background session's events: call it once they are handled.
+    /// From the app delegate, when iOS woke DroidRun for the background session's events: call it once they are handled.
     var backgroundCompletion: (() -> Void)?
 
     private init() {
@@ -194,7 +194,7 @@ final class Downloads: ObservableObject {
         LiveDownload.update(jobs: jobs, speed: speed)
     }
 
-    /// The keep-alive stopped while Husk was in the background (a call took the audio): hand off, as if leaving now.
+    /// The keep-alive stopped while DroidRun was in the background (a call took the audio): hand off, as if leaving now.
     fileprivate func keepAliveLost() {
         if UIApplication.shared.applicationState != .active { leaving() }
     }
@@ -217,7 +217,7 @@ final class Downloads: ObservableObject {
 
     private func key(_ job: UUID, _ path: String) -> String { "\(job.uuidString)|\(path)" }
 
-    /// Start files until `parallel` are running: Husk's own requests while it is awake, nothing new while it is not (what was handed
+    /// Start files until `parallel` are running: DroidRun's own requests while it is awake, nothing new while it is not (what was handed
     /// to the background session carries on there).
     private func pump() {
         DownloadKeepAlive.shared.set(jobs.contains { !$0.complete && !$0.paused })
@@ -246,8 +246,8 @@ final class Downloads: ObservableObject {
         task.resume()
     }
 
-    /// Husk is leaving the screen. With a continued processing task running it carries on as it is; without one, each file's
-    /// remaining bytes go to the background session now, while Husk is still active.
+    /// DroidRun is leaving the screen. With a continued processing task running it carries on as it is; without one, each file's
+    /// remaining bytes go to the background session now, while DroidRun is still active.
     private func leaving() {
         if #available(iOS 26.0, *), ContinuedDownload.active { return }
         guard jobs.contains(where: { !$0.complete && !$0.paused }) else { return }
@@ -255,11 +255,11 @@ final class Downloads: ObservableObject {
         if DownloadKeepAlive.shared.running { HuskLog.log("downloads", "leaving the screen; kept running, downloads carry on"); return }
         awake = false
         if grace == .invalid {
-            grace = UIApplication.shared.beginBackgroundTask(withName: "Husk downloads") {
+            grace = UIApplication.shared.beginBackgroundTask(withName: "DroidRun downloads") {
                 MainActor.assumeIsolated { Downloads.shared.endGrace() }
             }
         }
-        // Stop Husk's own requests: what they wrote is on disk, and the background session continues from there.
+        // Stop DroidRun's own requests: what they wrote is on disk, and the background session continues from there.
         for task in directRunning.values { task.cancel() }
         directRunning.removeAll()
         var n = 0
@@ -279,18 +279,18 @@ final class Downloads: ObservableObject {
                 n += 1
             }
         }
-        HuskLog.log("downloads", "Husk is leaving the screen: \(n) file(s) handed to iOS's background downloads")
+        HuskLog.log("downloads", "DroidRun is leaving the screen: \(n) file(s) handed to iOS's background downloads")
         save()
     }
 
-    /// Back on screen: files the background session has not started are taken back and fetched by Husk again; ones it is part-way
+    /// Back on screen: files the background session has not started are taken back and fetched by DroidRun again; ones it is part-way
     /// through are left to finish there.
     private func returned() {
         endGrace()
         awake = true
         keepRunning()
         background.getAllTasks { tasks in
-            // Ones it has barely started on as well: Husk refetches 64 MB in seconds, where a file left to the background service
+            // Ones it has barely started on as well: DroidRun refetches 64 MB in seconds, where a file left to the background service
             // stays slow until it is done.
             let idle = tasks.filter { $0.countOfBytesReceived < 64 << 20 && $0.state == .running }
             for t in idle { t.cancel() }
@@ -453,7 +453,7 @@ final class Downloads: ObservableObject {
     private func save() { try? JSONEncoder().encode(jobs).write(to: Self.jobsFile, options: .atomic) }
 
     /// Where a finished file goes. A folder's files keep their paths under Shared Storage; a single file goes to its top; an APK waits
-    /// in Husk's own space until the library takes it.
+    /// in DroidRun's own space until the library takes it.
     nonisolated static func destination(_ kind: Job.Kind, _ path: String) -> URL? {
         let parts = path.split(separator: "/").map(String.init)
         guard !parts.isEmpty, !parts.contains(".."), !parts.contains(".") else { return nil }
@@ -506,15 +506,15 @@ final class Downloads: ObservableObject {
 
     // MARK: iOS 26
 
-    /// Ask to keep running after Husk leaves the screen (a continued processing task). The system shows its progress in the Dynamic
-    /// Island and on the Lock Screen, and Husk keeps downloading itself. Only from something the person did -- adding or resuming a
+    /// Ask to keep running after DroidRun leaves the screen (a continued processing task). The system shows its progress in the Dynamic
+    /// Island and on the Lock Screen, and DroidRun keeps downloading itself. Only from something the person did -- adding or resuming a
     /// download -- which is what the system allows.
     private func keepRunning() {
         guard let active = jobs.first(where: { !$0.complete && !$0.paused }) else { return }
         if #available(iOS 26.0, *) { ContinuedDownload.begin(title: active.title) }
     }
 
-    /// The continued processing task ended (finished, or stopped by the system): if Husk is not on screen, hand off now.
+    /// The continued processing task ended (finished, or stopped by the system): if DroidRun is not on screen, hand off now.
     fileprivate func continuedEnded() {
         if UIApplication.shared.applicationState != .active { leaving() }
     }
@@ -543,7 +543,7 @@ struct TaskTag: Codable {
     var encoded: String { (try? JSONEncoder().encode(self)).flatMap { String(data: $0, encoding: .utf8) } ?? "" }
 }
 
-/// Husk's own transfers: each response is written straight into its file's .part as it arrives. Runs on one serial queue.
+/// DroidRun's own transfers: each response is written straight into its file's .part as it arrives. Runs on one serial queue.
 final class DirectDownloadDelegate: NSObject, URLSessionDataDelegate {
     private final class Transfer {
         let tag: TaskTag
@@ -642,7 +642,7 @@ final class BackgroundDownloadDelegate: NSObject, URLSessionDownloadDelegate {
             if status == 416 {
                 // Nothing was left to send: the .part is already whole.
             } else if status == 206, tag.offset > 0, Downloads.size(part) >= tag.offset {
-                // Append the rest to what was there. The .part can be a little longer than when the request was made (Husk's own
+                // Append the rest to what was there. The .part can be a little longer than when the request was made (DroidRun's own
                 // transfer was still writing as it was stopped); the response is exactly the bytes from the offset, so cut it back first.
                 guard let out = try? FileHandle(forWritingTo: part), let inp = try? FileHandle(forReadingFrom: location) else { throw CocoaError(.fileWriteUnknown) }
                 try out.truncate(atOffset: UInt64(tag.offset))
@@ -682,7 +682,7 @@ final class BackgroundDownloadDelegate: NSObject, URLSessionDownloadDelegate {
 enum LiveDownload {
     static func update(jobs: [Downloads.Job], speed: Double) {
         if #available(iOS 26.0, *), ContinuedDownload.update(jobs: jobs, speed: speed) {
-            // The system's own progress is showing; Husk's Live Activity would only repeat it.
+            // The system's own progress is showing; DroidRun's Live Activity would only repeat it.
             #if canImport(ActivityKit)
             if #available(iOS 16.1, *) { Live.end() }
             #endif
@@ -753,7 +753,7 @@ private enum Live {
 }
 #endif
 
-/// The download as a continued processing task (iOS 26): the system keeps Husk running in the background for it and shows its
+/// The download as a continued processing task (iOS 26): the system keeps DroidRun running in the background for it and shows its
 /// progress in the Dynamic Island and on the Lock Screen.
 @available(iOS 26.0, *)
 @MainActor
@@ -764,7 +764,7 @@ enum ContinuedDownload {
     private static var lastSubtitle = Date.distantPast
 
     static var running: Bool { task != nil || pending != nil }
-    /// The system started it: Husk is being kept running.
+    /// The system started it: DroidRun is being kept running.
     static var active: Bool { task != nil }
 
     private static var refused = false
@@ -772,18 +772,18 @@ enum ContinuedDownload {
     static func begin(title: String) {
         guard !running, !refused, let bundle = Bundle.main.bundleIdentifier else { return }
         // The launch handler is registered for a wildcard pattern from Info.plist, and the submitted identifier has to start with the
-        // app's bundle ID. A sideloader renames the bundle (com.husk.app.<team>) but not Info.plist: then the broad com.husk.app.* is
+        // app's bundle ID. A sideloader renames the bundle (com.droidrun.app.<team>) but not Info.plist: then the broad com.droidrun.app.* is
         // the pattern, and the identifier is made from the bundle ID as it is now.
         let permitted = Bundle.main.object(forInfoDictionaryKey: "BGTaskSchedulerPermittedIdentifiers") as? [String] ?? []
         guard let downloads = permitted.first(where: { $0.hasSuffix(".downloads.*") }) else { return }
-        let built = String(downloads.dropLast(".downloads.*".count))      // the bundle ID Husk was built with
+        let built = String(downloads.dropLast(".downloads.*".count))      // the bundle ID DroidRun was built with
         let pattern: String? = bundle == built ? downloads : (bundle.hasPrefix(built + ".") ? permitted.first { $0 == built + ".*" } : nil)
         guard let pattern else { refused = true; HuskLog.log("downloads", "background task: no permitted pattern"); return }
         if registered != pattern {
             let ok = BGTaskScheduler.shared.register(forTaskWithIdentifier: pattern, using: .main) { t in
                 MainActor.assumeIsolated { started(t) }
             }
-            guard ok else { refused = true; HuskLog.log("downloads", "background task: \(pattern) not permitted; Husk keeps itself running instead"); return }
+            guard ok else { refused = true; HuskLog.log("downloads", "background task: \(pattern) not permitted; DroidRun keeps itself running instead"); return }
             registered = pattern
         }
         let id = "\(bundle).downloads.\(UUID().uuidString.prefix(8))"
@@ -794,7 +794,7 @@ enum ContinuedDownload {
             pending = id
             HuskLog.log("downloads", "background task submitted (\(id), handler \(pattern))")
         } catch {
-            HuskLog.log("downloads", "background task \(id) refused: \(error.localizedDescription); using Husk's Live Activity instead")
+            HuskLog.log("downloads", "background task \(id) refused: \(error.localizedDescription); using DroidRun's Live Activity instead")
         }
     }
 
@@ -821,7 +821,7 @@ enum ContinuedDownload {
         if active.isEmpty {
             let failed = jobs.contains { $0.failed }
             t.progress.completedUnitCount = t.progress.totalUnitCount
-            t.updateTitle(failed ? "Download stopped" : "Download finished", subtitle: failed ? "Open Husk to retry" : (jobs.first?.title ?? ""))
+            t.updateTitle(failed ? "Download stopped" : "Download finished", subtitle: failed ? "Open DroidRun to retry" : (jobs.first?.title ?? ""))
             t.setTaskCompleted(success: !failed)
             task = nil
             HuskLog.log("downloads", "background task completed")
@@ -848,8 +848,8 @@ enum ContinuedDownload {
     }
 }
 
-/// Keeps Husk running in the background while downloads are active, by playing silence: iOS lets an app that is playing audio keep
-/// running, so Husk goes on downloading at full speed and its Live Activity stays current. It mixes with other audio (music keeps
+/// Keeps DroidRun running in the background while downloads are active, by playing silence: iOS lets an app that is playing audio keep
+/// running, so DroidRun goes on downloading at full speed and its Live Activity stays current. It mixes with other audio (music keeps
 /// playing) and stops as soon as nothing is downloading. The way an App Store app would do this is a continued processing task, which
 /// iOS refuses a sideloaded copy (its bundle ID no longer matches the identifiers in Info.plist).
 @MainActor
@@ -903,7 +903,7 @@ final class DownloadKeepAlive {
             self.engine = engine
             self.player = player
             running = true
-            HuskLog.log("downloads", "keep-alive on: Husk keeps running in the background while downloading")
+            HuskLog.log("downloads", "keep-alive on: DroidRun keeps running in the background while downloading")
         } catch {
             HuskLog.log("downloads", "keep-alive failed: \(error.localizedDescription)")
         }

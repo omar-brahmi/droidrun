@@ -17,7 +17,7 @@ enum TLNativeEngine {
     case godot     // A Godot 3 or 4 game: the manifest says which way up, OpenGL ES through ANGLE, multi-touch
     case nativeactivity // A game that is a NativeActivity library of its own (Open Golf): the manifest says which way up, OpenGL ES through ANGLE
     case gamemaker // A GameMaker game: YoYo's runner draws with OpenGL ES through ANGLE; options.ini says which way up
-    case java      // A Java app (libGDX games): Husk's own Dalvik runtime runs its code, GLSurfaceView draws through ANGLE
+    case java      // A Java app (libGDX games): DroidRun's own Dalvik runtime runs its code, GLSurfaceView draws through ANGLE
     case flutter   // A Flutter app: the engine and the app's Dart run natively, Impeller draws through ANGLE; portrait unless the manifest says
 }
 
@@ -264,7 +264,7 @@ final class TLUnityUIView: UIView, UIKeyInput {
                 if engine == .java { attachWebHost(fresh: false) }
                 return
             }
-            HuskLog.log("tl", "native: \(loaded ?? "another app") is still loaded; close Husk to start \(apk)")
+            HuskLog.log("tl", "native: \(loaded ?? "another app") is still loaded; close DroidRun to start \(apk)")
             return
         }
         // The game plays through the silent switch, like the guest's own audio, and mixes with other audio. Unity games too:
@@ -280,7 +280,7 @@ final class TLUnityUIView: UIView, UIKeyInput {
         JITLess.prepareLaunch()
         for extra in extraApks.prefix(15) { husk_native_add_package(extra) }
         // Android's shared storage, one folder for every game: a game that keeps its data in a folder of its own on /sdcard finds it
-        // in Husk's "Shared Storage", which can be filled from Files or Finder.
+        // in DroidRun's "Shared Storage", which can be filled from Files or Finder.
         husk_native_set_shared_storage(TranslationLayer.sharedStorage.path)
         // The CA certificates and system fonts Android keeps under /system, as the app carries them.
         if let sys = Bundle.main.resourcePath.map({ $0 + "/android-system" }), FileManager.default.fileExists(atPath: sys) {
@@ -312,7 +312,7 @@ final class TLUnityUIView: UIView, UIKeyInput {
             if geode != nil { HuskLog.log("geode", "loading Geode into the game") }
             started = husk_cocos_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
         case .java:
-            // Husk's Dalvik runtime: libcore, ICU and Husk's Java framework, carried in the app.
+            // DroidRun's Dalvik runtime: libcore, ICU and DroidRun's Java framework, carried in the app.
             husk_java_set_runtime((Bundle.main.resourcePath ?? "") + "/java-runtime", Float(contentScaleFactor))
             husk_java_set_night_mode(traitCollection.userInterfaceStyle == .dark ? 1 : 0)
             // The notch and the home indicator, in surface pixels: the app's window keeps its content out of them.
@@ -501,7 +501,7 @@ final class TLUnityUIView: UIView, UIKeyInput {
         }
     }
 
-    /// A Java app's views (Husk's framework): a focused text field asks for the keyboard with Android's EditorInfo input type and
+    /// A Java app's views (DroidRun's framework): a focused text field asks for the keyboard with Android's EditorInfo input type and
     /// IME options; the clipboard is the iPhone's; sharing opens the share sheet.
     static func installJavaHandlers() {
         husk_java_set_host({ show, inputType, imeOptions in

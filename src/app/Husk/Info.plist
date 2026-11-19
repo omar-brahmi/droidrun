@@ -11,7 +11,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Husk</string>
+	<string>DroidRun</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -24,9 +24,9 @@
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>com.android.package-archive</string>
-				<string>app.husk.xapk</string>
-				<string>app.husk.apkm</string>
-				<string>app.husk.apks</string>
+				<string>app.droidrun.xapk</string>
+				<string>app.droidrun.apkm</string>
+				<string>app.droidrun.apks</string>
 			</array>
 		</dict>
 		<dict>
@@ -67,7 +67,7 @@
 			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>husk</string>
+				<string>droidrun</string>
 			</array>
 		</dict>
 	</array>
@@ -94,7 +94,7 @@
 		<string>_remotepairing._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Husk uses the local network to pair with this iPhone for JIT, without a computer.</string>
+	<string>DroidRun uses the local network to pair with this iPhone for JIT, without a computer.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
@@ -163,7 +163,7 @@
 			<key>UTTypeDescription</key>
 			<string>Android App Bundle (XAPK)</string>
 			<key>UTTypeIdentifier</key>
-			<string>app.husk.xapk</string>
+			<string>app.droidrun.xapk</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>
@@ -181,7 +181,7 @@
 			<key>UTTypeDescription</key>
 			<string>Android App Bundle (APKM)</string>
 			<key>UTTypeIdentifier</key>
-			<string>app.husk.apkm</string>
+			<string>app.droidrun.apkm</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>
@@ -199,7 +199,7 @@
 			<key>UTTypeDescription</key>
 			<string>Android App Bundle (APKS)</string>
 			<key>UTTypeIdentifier</key>
-			<string>app.husk.apks</string>
+			<string>app.droidrun.apks</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>

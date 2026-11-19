@@ -2327,8 +2327,8 @@ static bool aot_import(const char *name, const uint8_t *file, size_t flen, uint6
     /* the image is at its pages' own vaddrs inside the dylib, executable pages in a __TEXT segment and data pages in a __DATA one,
      * so one pointer reaches both and nothing has to be remapped at run time (iOS refuses that) */
     uint8_t *x = mh ? (uint8_t *)(uintptr_t)mh + PAGE : NULL;
-    const char *why = !x || !M || msz != sizeof(*M) ? "it is not a Husk library dylib"
-                    : memcmp(M->magic, TL_AOT_MAGIC, 8) || M->version != TL_AOT_VERSION || M->page != PAGE ? "it was made by another version of Husk"
+    const char *why = !x || !M || msz != sizeof(*M) ? "it is not a DroidRun library dylib"
+                    : memcmp(M->magic, TL_AOT_MAGIC, 8) || M->version != TL_AOT_VERSION || M->page != PAGE ? "it was made by another version of DroidRun"
                     : M->so_size != flen || M->base_vaddr != base_vaddr || M->npages != npages || M->nstub != nstub || M->size != size
                       || M->n_mixed != n_mixed ? "it does not match the library"
                     : M->so_hash != hash ? "it was made from another version of the library"

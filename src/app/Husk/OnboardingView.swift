@@ -2,7 +2,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// What Husk asks on a first install, and remembers.
+/// What DroidRun asks on a first install, and remembers.
 ///
 /// Deliberately versioned rather than a plain "seen it" flag: a later build that
 /// adds a question needs to be able to ask it, and existing installs must not be
@@ -22,7 +22,7 @@ enum Onboarding {
         UserDefaults.standard.set(version, forKey: key)
     }
 
-    /// What apps inside Husk are told about where you are, chosen in setup.
+    /// What apps inside DroidRun are told about where you are, chosen in setup.
     // TODO: hand these to the guest (TL locale/time zone and Android's persist.sys.locale / TZ); stored only for now.
     static let languageKey = "husk.guest.language"
     static let regionKey = "husk.guest.region"
@@ -35,7 +35,7 @@ enum Onboarding {
 }
 
 /// First run: setup in the manner of the iPhone's own -- language, region, time zone, the
-/// optional settings, JIT -- and an offer of a walkthrough. Shown once; people who set up an older Husk get What's New instead.
+/// optional settings, JIT -- and an offer of a walkthrough. Shown once; people who set up an older DroidRun get What's New instead.
 struct OnboardingView: View {
     let onDone: () -> Void
 
@@ -128,7 +128,7 @@ struct OnboardingView: View {
             if step != .ask {
                 VStack(spacing: 14) {
                     dots
-                    Button(step == .tour && tourPage == Self.tour.count - 1 ? "Start Using Husk" : "Continue") { next() }
+                    Button(step == .tour && tourPage == Self.tour.count - 1 ? "Start Using DroidRun" : "Continue") { next() }
                         .buttonStyle(PrimaryButtonStyle())
                 }
                 .padding(.horizontal, 28)
@@ -178,7 +178,7 @@ struct OnboardingView: View {
         d.set(sound, forKey: "husk.sound")
         d.set(autoSave, forKey: "husk.autoSave")
         d.set(language, forKey: Onboarding.languageKey)
-        // Husk's own screens and the apps in it use this language from the next launch (#156): iOS's per-app language, which the
+        // DroidRun's own screens and the apps in it use this language from the next launch (#156): iOS's per-app language, which the
         // runtime also reads for the apps' locale. Only when it differs from the phone's, so the phone's choice keeps applying otherwise.
         if !(Locale.preferredLanguages.first ?? "en").hasPrefix(language) { d.set([language], forKey: "AppleLanguages") }
         else { d.removeObject(forKey: "AppleLanguages") }
@@ -199,7 +199,7 @@ struct OnboardingView: View {
         case .welcome: welcome
         case .language:
             picker(symbol: "globe", title: "Language",
-                   subtitle: "The language Husk and the apps and games in it use, from the next time Husk opens.",
+                   subtitle: "The language DroidRun and the apps and games in it use, from the next time DroidRun opens.",
                    rows: Self.languages, selection: $language)
         case .region:
             picker(symbol: "map.fill", title: "Region",
@@ -240,7 +240,7 @@ struct OnboardingView: View {
         VStack(spacing: 18) {
             Spacer()
             HuskMark(size: 110)
-            Text("Welcome to Husk")
+            Text("Welcome to DroidRun")
                 .font(.system(size: 34, weight: .bold))
             Text("Android and PS4 games, on your iPhone.")
                 .font(.title3).foregroundStyle(.secondary)
@@ -321,7 +321,7 @@ struct OnboardingView: View {
                 .padding(16)
                 .huskCard()
 
-                choice(icon: "bolt.fill", title: "Start Android When Husk Opens",
+                choice(icon: "bolt.fill", title: "Start Android When DroidRun Opens",
                        detail: "Off by default. The full Android emulator is experimental: starting it on launch can cause unwanted "
                              + "bugs, freezes and crashes, and slows every launch. Games and apps don't need it.",
                        isOn: $autoStart, caution: true)
@@ -361,8 +361,8 @@ struct OnboardingView: View {
     /// What the JIT page says is already in place, if anything.
     private var jitState: String? {
         if JITBootstrap.ready { return "JIT is on." }
-        if jit.method == .stikDebug { return "Husk will use StikDebug." }
-        if jit.method == .trollStore { return "Husk will use TrollStore." }
+        if jit.method == .stikDebug { return "DroidRun will use StikDebug." }
+        if jit.method == .trollStore { return "DroidRun will use TrollStore." }
         switch jit.pairingSource {
         case .onDevice: return "Paired on this device."
         case .imported: return "Pairing file imported."
@@ -395,7 +395,7 @@ struct OnboardingView: View {
                         }
                     }
                     .foregroundStyle(Theme.accent)
-                    Text("Import the certificate SideStore or AltStore installed Husk with, or a .p12.")
+                    Text("Import the certificate SideStore or AltStore installed DroidRun with, or a .p12.")
                         .font(.caption).foregroundStyle(.secondary)
                     if let info = certificate.info {
                         Text("Certificate: team \(info.teamID).")
@@ -428,7 +428,7 @@ struct OnboardingView: View {
                 }
                 .padding(.horizontal, 28)
 
-                Text("You can skip this: Husk asks again when a game needs it. JIT is in Settings › JIT & Sideload, Play without JIT is next to it.")
+                Text("You can skip this: DroidRun asks again when a game needs it. JIT is in Settings › JIT & Sideload, Play without JIT is next to it.")
                     .font(.footnote).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 36)
@@ -440,7 +440,7 @@ struct OnboardingView: View {
     private var ask: some View {
         VStack(spacing: 18) {
             Spacer()
-            header("map.circle.fill", "Would you like a walkthrough?", "A quick look at how Husk works: where your games are, how to add more, and where the settings live.")
+            header("map.circle.fill", "Would you like a walkthrough?", "A quick look at how DroidRun works: where your games are, how to add more, and where the settings live.")
             Spacer()
             VStack(spacing: 12) {
                 Button("Show Me Around") {
@@ -470,14 +470,14 @@ struct OnboardingView: View {
                      + "game for its options. The dot shows how it runs: green plays, orange opens, red is broken."),
         TourCard(symbol: "plus.circle.fill", title: "Adding Games",
                  text: "Tap + to add an Android APK or bundle (.xapk, .apkm, .apks), or a PS4 game: a fake package (.pkg), a folder of "
-                     + "them, or an extracted game folder. You can also share files to Husk from Files or Safari."),
+                     + "them, or an extracted game folder. You can also share files to DroidRun from Files or Safari."),
         TourCard(symbol: "cart.fill", title: "Store",
-                 text: "Browse and download Android apps from Google Play, with a guest account or your own, and see how each runs in Husk."),
+                 text: "Browse and download Android apps from Google Play, with a guest account or your own, and see how each runs in DroidRun."),
         TourCard(symbol: "bolt.fill", title: "Settings & JIT",
                  text: "Games need JIT, or Play without JIT with a certificate. Both are in Settings. Settings also has performance, appearance, "
                      + "input, and the optional full Android emulator."),
         TourCard(symbol: "questionmark.circle.fill", title: "Help",
-                 text: "Stuck? Settings › Help answers the common problems, and a game that crashes Husk leaves a report to share."),
+                 text: "Stuck? Settings › Help answers the common problems, and a game that crashes DroidRun leaves a report to share."),
     ]
 
     private func tourCard(_ card: TourCard) -> some View {

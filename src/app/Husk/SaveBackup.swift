@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import Foundation
 
-/// A game's saves, out of Husk and back in: one .zip with everything the game wrote, and a manifest saying whose it is.
+/// A game's saves, out of DroidRun and back in: one .zip with everything the game wrote, and a manifest saying whose it is.
 ///
 /// What a game saves lives in its folder beside its APKs, in the data folder of the engine that runs it (unity-data,
-/// cocos-data, ...): its files, its preferences, Geode's mods. A backup is those folders, less what the game or Husk can make
+/// cocos-data, ...): its files, its preferences, Geode's mods. A backup is those folders, less what the game or DroidRun can make
 /// again (caches, unpacked engine files). The zip is stored, not compressed, so it is quick to make and the Files app opens it.
 /// Restoring replaces the game's data with the backup's, after checking it is a backup of the same game.
 enum SaveBackup {
@@ -14,7 +14,7 @@ enum SaveBackup {
         var errorDescription: String? { message }
     }
 
-    /// Folders that are made again by the game or by Husk, and are left out of a backup.
+    /// Folders that are made again by the game or by DroidRun, and are left out of a backup.
     private static let skipped: Set<String> = ["cache", "il2cpp", "UnityShaderCache", "geode-bin", "code_cache", "tmp"]
     private static let manifestName = "husk-backup.json"
 
@@ -77,7 +77,7 @@ enum SaveBackup {
         let zip = try ZipReader(zipURL)
         guard let mdata = try zip.data(manifestName),
               let manifest = try JSONSerialization.jsonObject(with: mdata) as? [String: Any] else {
-            throw Failure("That file is not a Husk save backup.")
+            throw Failure("That file is not a DroidRun save backup.")
         }
         let pkg = manifest["package"] as? String ?? ""
         if let mine = app.packageName, !pkg.isEmpty, pkg != mine {
@@ -229,7 +229,7 @@ private final class ZipReader {
     deinit { try? file.close() }
 
     private func start(_ e: Entry) throws -> UInt64 {
-        guard e.method == 0 else { throw SaveBackup.Failure("That backup was recompressed by another app; Husk reads only the backups it makes.") }
+        guard e.method == 0 else { throw SaveBackup.Failure("That backup was recompressed by another app; DroidRun reads only the backups it makes.") }
         try file.seek(toOffset: e.local)
         let h = [UInt8](try file.read(upToCount: 30) ?? Data())
         guard h.count == 30 else { throw SaveBackup.Failure("That backup is damaged.") }

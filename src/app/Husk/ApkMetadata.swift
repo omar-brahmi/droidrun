@@ -3,7 +3,7 @@ import Foundation
 
 /// An app's real name and real icon, read the way Android reads them.
 ///
-/// Husk used to guess both. The name was the last component of the package with
+/// DroidRun used to guess both. The name was the last component of the package with
 /// a capital letter on it, so `com.example.test` became "Test"; the icon was the
 /// largest PNG in the APK whose path happened to contain "launcher" or "icon".
 /// The second guess fails outright on any modern app: since Android 8 the

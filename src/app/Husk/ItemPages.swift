@@ -182,15 +182,15 @@ struct GamePage: View {
                     .heroRow()
             } footer: {
                 if isGeodeLauncher {
-                    Text("This is Geode's Android launcher. On Husk, Geode runs inside Geometry Dash instead: turn it on here "
+                    Text("This is Geode's Android launcher. On DroidRun, Geode runs inside Geometry Dash instead: turn it on here "
                        + "(or in Geometry Dash's settings, under Mods), then start Geometry Dash and use Geode's button on its "
                        + "main menu to get mods. This APK supplies a library Geode needs, so keep it.")
                 } else if !runs {
-                    Text("This APK has no ARM code Husk can run, so it will probably not start.")
+                    Text("This APK has no ARM code DroidRun can run, so it will probably not start.")
                 }
             }
 
-            // what the files say before it starts: a damaged APK, the wrong CPU, a missing piece, protection that refuses Husk
+            // what the files say before it starts: a damaged APK, the wrong CPU, a missing piece, protection that refuses DroidRun
             if let d = preflight {
                 Section {
                     AppDiagnosisCard(diagnosis: d)
@@ -235,8 +235,8 @@ struct GamePage: View {
                     Text("Saves")
                 } footer: {
                     if let savesMessage { Text(savesMessage) }
-                    else if loadedNow { Text("\(app.label) has been started in this run of Husk. Close Husk and open it again to restore saves.") }
-                    else { Text("A backup is a .zip of everything \(app.label) has saved in Husk, to keep in Files or move to another device.") }
+                    else if loadedNow { Text("\(app.label) has been started in this run of DroidRun. Close DroidRun and open it again to restore saves.") }
+                    else { Text("A backup is a .zip of everything \(app.label) has saved in DroidRun, to keep in Files or move to another device.") }
                 }
             }
 
@@ -263,7 +263,7 @@ struct GamePage: View {
                         store.remove(app)
                     }
                 } message: {
-                    Text("The game and everything it saved here are deleted from Husk.")
+                    Text("The game and everything it saved here are deleted from DroidRun.")
                 }
             }
         }
@@ -287,15 +287,15 @@ struct GamePage: View {
         } message: {
             Text(prepareFailed ?? "")
         }
-        .confirmationDialog("Close Husk?", isPresented: $confirmQuit, titleVisibility: .visible) {
-            Button("Close Husk") {
+        .confirmationDialog("Close DroidRun?", isPresented: $confirmQuit, titleVisibility: .visible) {
+            Button("Close DroidRun") {
                 Router.shared.switchTo(app.id)
                 CrashReport.gameEnded()
                 HuskLog.flushNow()
                 exit(0)
             }
         } message: {
-            Text("\(blockedBy ?? "The other game") is still loaded and only one game can run per session. Husk closes; open it again and \(app.label) starts by itself.")
+            Text("\(blockedBy ?? "The other game") is still loaded and only one game can run per session. DroidRun closes; open it again and \(app.label) starts by itself.")
         }
         .id(jit.attachGeneration)
         .onAppear {
@@ -346,7 +346,7 @@ struct GamePage: View {
         Task { try? await Task.sleep(nanoseconds: 500_000_000); reporting = subject }
     }
 
-    /// Full screen, or in a window over Husk when Multitasking says so for this app.
+    /// Full screen, or in a window over DroidRun when Multitasking says so for this app.
     private func start() {
         if app.report?.runsOnNativeRuntime == true || app.report?.webKind != nil, AppWindows.opensInWindow(app) {
             AppWindows.shared.open(app)
@@ -356,7 +356,7 @@ struct GamePage: View {
         }
     }
 
-    /// This game's engine is loaded in this run of Husk, so its files may be open: no restoring under it.
+    /// This game's engine is loaded in this run of DroidRun, so its files may be open: no restoring under it.
     private var loadedNow: Bool {
         guard let loaded = husk_native_loaded_apk().map({ String(cString: $0) }) else { return false }
         return loaded == app.apks.first
@@ -408,7 +408,7 @@ struct GamePage: View {
         }
     }
 
-    /// Geode's Android launcher, added as if it were a game: it is a whole Android app, which Husk does not run. On Husk Geode
+    /// Geode's Android launcher, added as if it were a game: it is a whole Android app, which DroidRun does not run. On DroidRun Geode
     /// is turned on from Geometry Dash's own settings, and this APK only lends it a library.
     private var isGeodeLauncher: Bool { app.packageName == GeodeSupport.launcherPackage }
     private var geometryDash: TLApp? { store.apps.first { $0.packageName == GeodeSupport.gamePackage } }
@@ -431,7 +431,7 @@ struct GamePage: View {
             HStack(spacing: 10) { ProgressView(); Text(preparing).foregroundStyle(.secondary).lineLimit(1) }
                 .frame(maxWidth: .infinity).frame(height: 50)
         } else if blockedBy != nil {
-            BigButton(title: "Close Husk to Play", systemImage: "xmark.circle", prominent: false) { confirmQuit = true }
+            BigButton(title: "Close DroidRun to Play", systemImage: "xmark.circle", prominent: false) { confirmQuit = true }
         } else if !Launcher.jitOn && !JITLess.enabled {
             if jit.busy {
                 HStack(spacing: 10) { ProgressView(); Text(jit.status ?? "Turning on JIT…").foregroundStyle(.secondary) }
@@ -447,7 +447,7 @@ struct GamePage: View {
 
 // MARK: - a PS4 game
 
-/// A PS4 game from Documents/PS4 Games: Play, and what it is. Run by the PS4 layer (libhuskps4.dylib) on Husk's JIT.
+/// A PS4 game from Documents/PS4 Games: Play, and what it is. Run by the PS4 layer (libhuskps4.dylib) on DroidRun's JIT.
 struct PS4GamePage: View {
     let game: PS4Game
     @ObservedObject private var jit = JITCoordinator.shared
@@ -486,13 +486,13 @@ struct PS4GamePage: View {
             if !PS4Store.available {
                 Section {
                     Text(PS4Store.moduleURL == nil
-                         ? "This build of Husk does not include the PS4 layer."
+                         ? "This build of DroidRun does not include the PS4 layer."
                          : "PS4 games need iOS 17.4 or later.")
                         .foregroundStyle(.secondary)
                 }
             }
             Section("About") {
-                LabeledContent("Runs With", value: "Husk's PS4 layer")
+                LabeledContent("Runs With", value: "DroidRun's PS4 layer")
                 LabeledContent("Title ID", value: game.titleID)
                 if let v = game.version { LabeledContent("Version", value: v) }
                 LabeledContent("Last Played", value: game.lastPlayed.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "Never")
@@ -503,15 +503,15 @@ struct PS4GamePage: View {
         .navigationTitle(game.title)
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(isPresented: $playing) { PS4PlayView(game: game) }
-        .confirmationDialog("Close Husk?", isPresented: $confirmQuit, titleVisibility: .visible) {
-            Button("Close Husk") {
+        .confirmationDialog("Close DroidRun?", isPresented: $confirmQuit, titleVisibility: .visible) {
+            Button("Close DroidRun") {
                 Router.shared.switchTo(game.libraryID)
                 CrashReport.gameEnded()
                 HuskLog.flushNow()
                 exit(0)
             }
         } message: {
-            Text("\(blockedBy ?? "The other game") is still loaded and only one game can run per session. Husk closes; open it again and \(game.title) starts by itself.")
+            Text("\(blockedBy ?? "The other game") is still loaded and only one game can run per session. DroidRun closes; open it again and \(game.title) starts by itself.")
         }
         .id(jit.attachGeneration)
         .onAppear {
@@ -526,7 +526,7 @@ struct PS4GamePage: View {
         if !PS4Store.available {
             BigButton(title: "Can't Play Here", systemImage: "xmark.octagon", prominent: false) { }.disabled(true)
         } else if blockedBy != nil {
-            BigButton(title: "Close Husk to Play", systemImage: "xmark.circle", prominent: false) { confirmQuit = true }
+            BigButton(title: "Close DroidRun to Play", systemImage: "xmark.circle", prominent: false) { confirmQuit = true }
         } else if !Launcher.jitOn {
             if jit.busy {
                 HStack(spacing: 10) { ProgressView(); Text(jit.status ?? "Turning on JIT…").foregroundStyle(.secondary) }
@@ -734,7 +734,7 @@ struct AndroidSystemPage: View {
     private var note: String? {
         guard !running else { return nil }
         switch guest.state {
-        case .missing: return "Husk's Android runtime is about 760 MB. Android itself follows once it is installed."
+        case .missing: return "DroidRun's Android runtime is about 760 MB. Android itself follows once it is installed."
         case .failed(let message): return message
         default: return nil
         }

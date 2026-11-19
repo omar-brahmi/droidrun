@@ -41,7 +41,7 @@ private struct FDroidLocalized: Codable {
 }
 private struct FDroidPackage: Codable { let apkName: String; let versionName: String }
 
-// MARK: - Husk Simple Schema
+// MARK: - DroidRun Simple Schema
 private struct HuskSimpleSource: Codable {
     let name: String; let identifier: String; let apps: [SourceAppCodable]
 }
@@ -138,7 +138,7 @@ final class SourceManager: ObservableObject {
                 let source = AppSource(name: fdroid.repo.name, identifier: urlString, apps: apps)
                 upsert(source: source)
             }
-            // Fallback: Husk simple format
+            // Fallback: DroidRun simple format
             else if let simple = try? JSONDecoder().decode(HuskSimpleSource.self, from: data) {
                 let apps = simple.apps.map {
                     SourceApp(name: $0.name, bundleIdentifier: $0.bundleIdentifier,

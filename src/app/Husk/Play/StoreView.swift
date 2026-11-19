@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import SwiftUI
 
-/// Google Play Store tab in Husk.
+/// Google Play Store tab in DroidRun.
 /// Lets users sign in with their Google account, browse/search Play Store, view app details,
 /// and download/install apps (triggering the IncomingFiles chooser for translation layer or Android).
 struct StoreView: View {
@@ -192,7 +192,7 @@ struct StoreView: View {
     private var games: [PlayAPI.PlayApp] { manager.featuredApps.filter { !PlayAPI.featuredAppPackages.contains($0.id) } }
     private var apps: [PlayAPI.PlayApp] { manager.featuredApps.filter { PlayAPI.featuredAppPackages.contains($0.id) } }
 
-    /// What runs best on Husk, from the compatibility list: the most reported among those that work, with an icon.
+    /// What runs best on DroidRun, from the compatibility list: the most reported among those that work, with an icon.
     private var trending: [CompatibilityStore.Entry] {
         compat.entries.values
             .filter { $0.status == .works && $0.icon != nil && !manager.featuredApps.map(\.id).contains($0.package) }
@@ -256,7 +256,7 @@ struct StoreView: View {
                     Text(shelf == .apps ? "Apps for\nevery day." : "Discover\nnew worlds.")
                         .font(.system(size: 28, weight: .bold)).foregroundStyle(.white)
                         .multilineTextAlignment(.leading)
-                    Text("\(app.title) and more, running on your iPhone with Husk.")
+                    Text("\(app.title) and more, running on your iPhone with DroidRun.")
                         .font(.system(size: 13)).foregroundStyle(.white.opacity(0.85))
                         .lineLimit(2).multilineTextAlignment(.leading)
                 }

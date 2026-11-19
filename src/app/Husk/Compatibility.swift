@@ -2,16 +2,16 @@
 import SwiftUI
 import UIKit
 
-/// Husk's compatibility list (itslevii.dev): how each app runs for everyone, next to how it ran on this iPhone (GameStatus).
+/// DroidRun's compatibility list (itslevii.dev): how each app runs for everyone, next to how it ran on this iPhone (GameStatus).
 ///
 /// The list is fetched now and then and kept on disk, so it shows offline and costs nothing at launch. Reports go to the
-/// same site: how a game ran, sent from Husk with the device, iOS, build and JIT method filled in.
+/// same site: how a game ran, sent from DroidRun with the device, iOS, build and JIT method filled in.
 @MainActor
 final class CompatibilityStore: ObservableObject {
     static let shared = CompatibilityStore()
 
     /// The site, then the old address for when it does not answer. A different one can be put first for testing
-    /// (defaults write com.husk.app husk.compatURL http://…).
+    /// (defaults write com.droidrun.app husk.compatURL http://…).
     static var sites: [URL] {
         let custom = UserDefaults.standard.string(forKey: "husk.compatURL").flatMap(URL.init(string:))
         // itslevii.dev (one Cloudflare Worker: the site and /api); the old antiweb.lol while the move settles
@@ -62,7 +62,7 @@ final class CompatibilityStore: ObservableObject {
         }
         throw last
     }
-    /// Whether Husk asks how a game ran after playing it (Settings).
+    /// Whether DroidRun asks how a game ran after playing it (Settings).
     static let askKey = "husk.compatAsk"
 
     enum Status: String, Codable {
@@ -96,7 +96,7 @@ final class CompatibilityStore: ObservableObject {
             case .works: return "Runs and plays or works normally."
             case .opens: return "Starts and shows its screens, but has not been fully tested or has problems."
             case .broken: return "Crashes or closes while starting."
-            case .protected: return "Refuses to run outside a real Android phone (anti-cheat, anti-tamper or DRM). Husk does not get around that."
+            case .protected: return "Refuses to run outside a real Android phone (anti-cheat, anti-tamper or DRM). DroidRun does not get around that."
             }
         }
     }
@@ -174,7 +174,7 @@ final class CompatibilityStore: ObservableObject {
 
     // MARK: reports
 
-    /// What Husk fills in on every report.
+    /// What DroidRun fills in on every report.
     static var device: String {
         var info = utsname()
         uname(&info)
@@ -240,7 +240,7 @@ final class CompatibilityStore: ObservableObject {
         return nil
     }
 
-    /// The end of Husk's log, as the log export shares it (husk.log): at most the last 400,000 bytes, cut on a character boundary.
+    /// The end of DroidRun's log, as the log export shares it (husk.log): at most the last 400,000 bytes, cut on a character boundary.
     static func logTail(limit: Int = 400_000) -> String? {
         guard let handle = try? FileHandle(forReadingFrom: HuskLog.logFileURL) else { return nil }
         defer { try? handle.close() }
@@ -253,7 +253,7 @@ final class CompatibilityStore: ObservableObject {
         return String(decoding: data[start...], as: UTF8.self)
     }
 
-    // Ask once per game per Husk build: a new build can change how a game runs.
+    // Ask once per game per DroidRun build: a new build can change how a game runs.
     private func askedKey(_ package: String) -> String { "husk.compatAsked.\(package)" }
     func shouldAsk(_ package: String?) -> Bool {
         guard let package, UserDefaults.standard.object(forKey: Self.askKey) as? Bool ?? true else { return false }
@@ -269,7 +269,7 @@ struct CompatSubject: Identifiable {
     let package: String
     let name: String
     let isGame: Bool
-    /// The icon Husk shows for it, sent along when the list has none.
+    /// The icon DroidRun shows for it, sent along when the list has none.
     var iconPath: String? = nil
     /// Filled in from a crash: it did not work, and why.
     var crash: String? = nil
@@ -314,7 +314,7 @@ struct CompatibilitySection: View {
         } header: {
             Text("Compatibility")
         } footer: {
-            if entry?.official != nil { Text("Tested by the Husk team on an iPhone.") }
+            if entry?.official != nil { Text("Tested by the DroidRun team on an iPhone.") }
         }
     }
 }
@@ -365,12 +365,12 @@ struct CompatReportSheet: View {
                 } header: {
                     Text("Your Name")
                 } footer: {
-                    Text("Sent with it: \(CompatibilityStore.device), iOS \(UIDevice.current.systemVersion), Husk build \(CompatibilityStore.build), \(JITLess.enabled ? "Play without JIT" : "JIT from \(CompatibilityStore.jitMethod)"). It shows on itslevii.dev for everyone.")
+                    Text("Sent with it: \(CompatibilityStore.device), iOS \(UIDevice.current.systemVersion), DroidRun build \(CompatibilityStore.build), \(JITLess.enabled ? "Play without JIT" : "JIT from \(CompatibilityStore.jitMethod)"). It shows on itslevii.dev for everyone.")
                 }
                 Section {
                     Toggle("Attach my log", isOn: $attachLog)
                 } footer: {
-                    Text("Your Husk log helps the developer see what went wrong. Only moderators can read it.")
+                    Text("Your DroidRun log helps the developer see what went wrong. Only moderators can read it.")
                 }
                 if let error {
                     Section { Text(error).foregroundStyle(.red) }

@@ -1,5 +1,6 @@
 # Builds DroidRun.ipa: the official Husk 3.4 IPA as the base, with
-#   - this repository's executable (Swift app + translation layer: GC, AVPlayer bridge, ClearKey),
+#   - this repository's app bundle: DroidRun.app, com.droidrun.app, its executable (Swift app + translation layer: GC,
+#     AVPlayer bridge, ClearKey), icons and translations; the base's Husk app extensions are left out,
 #   - JIT-less dylibs made from Husk's Java runtime libraries and the native libraries of every APK in packager/input,
 #   - this repository's Java framework (packager/runtime/*.dex),
 #   - the home-screen name "DroidRun".
@@ -22,7 +23,7 @@ env:
   HUSK_RELEASE: "3.4"
 
 jobs:
-  executable:
+  app:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
@@ -69,12 +70,17 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build 2>&1 | tee build.log \
             | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "BUILD SUCCEEDED" build.log || { grep -E "error:" build.log | head -40; exit 1; }
-          mkdir -p "$GITHUB_WORKSPACE/out" && cp build/Release-iphoneos/Husk.app/Husk "$GITHUB_WORKSPACE/out/Husk"
+          # the bundle as built: executable, Info.plist (com.droidrun.app), Assets.car (icons), translations, resources
+          APP=build/Release-iphoneos/DroidRun.app
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" -c "Print :CFBundleExecutable" "$APP/Info.plist"
+          rm -rf "$APP/PlugIns" "$APP/_CodeSignature"
+          mkdir -p "$GITHUB_WORKSPACE/out" && cp -R "$APP" "$GITHUB_WORKSPACE/out/"
+          du -sh "$GITHUB_WORKSPACE/out/DroidRun.app"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: executable
-          path: out/Husk
+          name: app
+          path: out/DroidRun.app
           retention-days: 7
 
   dylibs:
@@ -112,7 +118,7 @@ jobs:
           retention-days: 7
 
   ipa:
-    needs: [executable, dylibs]
+    needs: [app, dylibs]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -129,7 +135,7 @@ jobs:
       - name: Pack
         run: |
           python3 packager/pack.py dl/Husk.ipa art/dylibs DroidRun.ipa \
-            --exe art/executable/Husk --runtime packager/runtime --name "${{ inputs.name }}" | grep -v "^  +"
+            --app art/app --runtime packager/runtime --name "${{ inputs.name }}"
 
       - uses: actions/upload-artifact@v4
         with:

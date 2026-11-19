@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // A Play app's page: what Play says about it (rich text, the numbers in short, screenshots to open full screen, what is new,
-// the details) and how it runs on Husk.
+// the details) and how it runs on DroidRun.
 import SwiftUI
 
 struct PlayAppDetailSheet: View {

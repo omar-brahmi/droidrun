@@ -3,9 +3,9 @@ import SwiftUI
 
 // MARK: - one library
 
-/// Anything Husk can open: a game run on the translation layer, an app installed in Android, or Android itself.
+/// Anything DroidRun can open: a game run on the translation layer, an app installed in Android, or Android itself.
 ///
-/// The person never has to know which way something runs -- Husk does -- so the launcher sorts by what a thing is (a game,
+/// The person never has to know which way something runs -- DroidRun does -- so the launcher sorts by what a thing is (a game,
 /// an app), not by how it is run. The only trace of the second is a small badge on what opens inside Android, because that
 /// needs Android started first.
 enum LibraryItem: Identifiable, Hashable {
@@ -92,7 +92,7 @@ enum LibraryItem: Identifiable, Hashable {
         }
     }
 
-    /// "Played 2 hours ago", or nothing for what was never opened from Husk.
+    /// "Played 2 hours ago", or nothing for what was never opened from DroidRun.
     var usedText: String? {
         guard let date = lastUsed else { return nil }
         let rel = RelativeDateTimeFormatter()
@@ -276,7 +276,7 @@ struct HomeView: View {
 
     private var topBar: some View {
         HStack(spacing: 10) {
-            Text("Husk")
+            Text("DroidRun")
                 .font(.system(size: 30, weight: .bold, design: .rounded))
                 .foregroundStyle(Console.text)
                 .fixedSize()
@@ -637,7 +637,7 @@ private struct DownloadsNotice: View {
             return "\(running.count) downloading\(pct)"
         }
         if downloads.jobs.contains(where: \.failed) { return "A download failed" }
-        if let release = updates.available { return "Husk \(release.version) is out" }
+        if let release = updates.available { return "DroidRun \(release.version) is out" }
         if guest.update.isSomething { return "Android update ready" }
         return nil
     }
@@ -677,9 +677,9 @@ private struct WelcomeCard: View {
                 Text("Add your first game")
                     .font(.system(size: 26, weight: .heavy))
                     .foregroundStyle(Console.text)
-                Text("Pick an APK or a bundle (.xapk, .apkm, .apks), or share one to Husk from Files or Safari. Games run "
+                Text("Pick an APK or a bundle (.xapk, .apkm, .apks), or share one to DroidRun from Files or Safari. Games run "
                    + "straight on your iPhone. Other apps run inside Android. PS4 games are extracted folders put in "
-                   + "Husk's PS4 Games folder.")
+                   + "DroidRun's PS4 Games folder.")
                     .font(.subheadline)
                     .foregroundStyle(Console.textDim)
                     .fixedSize(horizontal: false, vertical: true)
@@ -718,7 +718,7 @@ struct IconBackdrop: View {
     }
 }
 
-/// What sits behind an item's name: its gameplay picture when Husk ships one, its blurred icon otherwise.
+/// What sits behind an item's name: its gameplay picture when DroidRun ships one, its blurred icon otherwise.
 struct ItemBackdrop: View {
     let item: LibraryItem
     var pixels: Int = 1200
@@ -835,7 +835,7 @@ struct LibraryScreen: View {
                     if pill == .all || pill == .ps4 {
                         section("PlayStation 4", playstation,
                                 empty: pill == .ps4 && query.isEmpty
-                                    ? (PS4Store.available ? "Put an extracted game folder in Husk's PS4 Games folder in Files."
+                                    ? (PS4Store.available ? "Put an extracted game folder in DroidRun's PS4 Games folder in Files."
                                                           : "PS4 games need iOS 17.4 or later.")
                                     : nil)
                     }
@@ -999,7 +999,7 @@ struct LauncherTile: View {
     var size: CGFloat = 64
     @ObservedObject private var statuses = GameStatusStore.shared
 
-    /// How the game did last time it was played, when Husk has seen it played.
+    /// How the game did last time it was played, when DroidRun has seen it played.
     private var result: GameStatusStore.Result? {
         guard case .game(let g)? = item else { return nil }
         return statuses.status(g.id)?.result
@@ -1085,7 +1085,7 @@ private struct RemoveItemDialog: ViewModifier {
     private var removeTitle: String { "\(removeVerb) \(item.title)?" }
     private var removeMessage: String {
         if case .app = item { return "It is uninstalled from Android, with its data." }
-        return "Its files and saved progress are deleted from Husk."
+        return "Its files and saved progress are deleted from DroidRun."
     }
 }
 

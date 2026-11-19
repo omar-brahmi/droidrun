@@ -78,17 +78,17 @@ public final class MediaCodec {
     public static MediaCodec createByCodecName(String name) throws IOException {
         MediaCodecInfo i = MediaCodecList.getInfoFor(name);
         if (i == null) throw new IllegalArgumentException("Failed to initialize " + name + ", error 0xfffffffe");
-        if (i.isEncoder()) throw new IOException("Husk has no encoder " + name);
+        if (i.isEncoder()) throw new IOException("DroidRun has no encoder " + name);
         return new MediaCodec(name, i.getSupportedTypes()[0]);
     }
     public static MediaCodec createByCodecNameForClient(String name, int pid, int uid) throws IOException { return createByCodecName(name); }
     public static MediaCodec createDecoderByType(String type) throws IOException {
         if (type == null) throw new NullPointerException();
         for (MediaCodecInfo i : MediaCodecList.infos()) for (String t : i.getSupportedTypes()) if (t.equalsIgnoreCase(type)) return new MediaCodec(i.getName(), t);
-        throw new IOException("Failed to create a decoder for " + type + " (Husk decodes H.264, HEVC, AAC and MP3)");
+        throw new IOException("Failed to create a decoder for " + type + " (DroidRun decodes H.264, HEVC, AAC and MP3)");
     }
-    public static MediaCodec createEncoderByType(String type) throws IOException { throw new IOException("Husk has no " + type + " encoder"); }
-    public static Surface createPersistentInputSurface() { throw new IllegalArgumentException("Husk has no encoders"); }
+    public static MediaCodec createEncoderByType(String type) throws IOException { throw new IOException("DroidRun has no " + type + " encoder"); }
+    public static Surface createPersistentInputSurface() { throw new IllegalArgumentException("DroidRun has no encoders"); }
     public static java.util.List getGloballyAvailableResources() { return new java.util.ArrayList(); }
     public static android.media.Image mapHardwareBuffer(android.hardware.HardwareBuffer b) { return null; }
 
@@ -100,7 +100,7 @@ public final class MediaCodec {
     public void configure(MediaFormat format, Surface surface, MediaCrypto crypto, int flags) {
         synchronized (mLock) {
             if (mState != ST_UNINITIALIZED) throw new IllegalStateException("configure in state " + mState);
-            if ((flags & CONFIGURE_FLAG_ENCODE) != 0) throw new IllegalStateException("Husk has no encoders");
+            if ((flags & CONFIGURE_FLAG_ENCODE) != 0) throw new IllegalStateException("DroidRun has no encoders");
             MediaFormat f = format != null ? new MediaFormat(format) : new MediaFormat();
             mInputFormat = f; mSurface = surface;
             int w = f.getInteger(MediaFormat.KEY_WIDTH, 0), h = f.getInteger(MediaFormat.KEY_HEIGHT, 0);
@@ -179,7 +179,7 @@ public final class MediaCodec {
         if (mCallback != null) postInput(gen, index);
     }
     public void queueSecureInputBuffer(int index, int offset, CryptoInfo info, long ptsUs, int flags) {
-        if (info != null && info.mode != CRYPTO_MODE_UNENCRYPTED) throw new CryptoException(CryptoException.ERROR_UNSUPPORTED_OPERATION, "Husk cannot decrypt protected media");
+        if (info != null && info.mode != CRYPTO_MODE_UNENCRYPTED) throw new CryptoException(CryptoException.ERROR_UNSUPPORTED_OPERATION, "DroidRun cannot decrypt protected media");
         int size = 0;
         if (info != null && info.numBytesOfClearData != null) for (int i = 0; i < info.numSubSamples; i++) size += info.numBytesOfClearData[i] + (info.numBytesOfEncryptedData != null ? info.numBytesOfEncryptedData[i] : 0);
         queueInputBuffer(index, offset, size, ptsUs, flags);
@@ -187,7 +187,7 @@ public final class MediaCodec {
     public void queueInputBuffers(int index, ArrayDeque infos) {
         for (Object o : infos) { BufferInfo b = (BufferInfo) o; queueInputBuffer(index, b.offset, b.size, b.presentationTimeUs, b.flags); }
     }
-    public void queueSecureInputBuffers(int index, ArrayDeque infos, ArrayDeque cryptos) { throw new CryptoException(CryptoException.ERROR_UNSUPPORTED_OPERATION, "Husk cannot decrypt protected media"); }
+    public void queueSecureInputBuffers(int index, ArrayDeque infos, ArrayDeque cryptos) { throw new CryptoException(CryptoException.ERROR_UNSUPPORTED_OPERATION, "DroidRun cannot decrypt protected media"); }
     private void decode(byte[] data, int size, long pts, int flags) {
         husk.MediaCodecNative.decode(mNative, data, size, pts, flags);
         collect();
@@ -370,9 +370,9 @@ public final class MediaCodec {
     public void setVideoScalingMode(int mode) { mScaling = mode; }
     public void setParameters(android.os.Bundle b) {}
     public void setAudioPresentation(AudioPresentation p) {}
-    public void setInputSurface(Surface s) { throw new IllegalStateException("Husk has no encoders"); }
-    public Surface createInputSurface() { throw new IllegalStateException("Husk has no encoders"); }
-    public void signalEndOfInputStream() { throw new IllegalStateException("Husk has no encoders"); }
+    public void setInputSurface(Surface s) { throw new IllegalStateException("DroidRun has no encoders"); }
+    public Surface createInputSurface() { throw new IllegalStateException("DroidRun has no encoders"); }
+    public void signalEndOfInputStream() { throw new IllegalStateException("DroidRun has no encoders"); }
     public String getName() { return mName; }
     public String getCanonicalName() { return mName; }
     public MediaCodecInfo getCodecInfo() { return MediaCodecList.getInfoFor(mName); }

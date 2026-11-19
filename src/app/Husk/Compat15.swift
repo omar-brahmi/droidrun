@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// What iOS 15 lacks of the SwiftUI Husk uses (#92, #131: TrollStore reaches iOS 15). On iOS 16 and later each of these is the
+// What iOS 15 lacks of the SwiftUI DroidRun uses (#92, #131: TrollStore reaches iOS 15). On iOS 16 and later each of these is the
 // system's own; on iOS 15 a stand-in that looks and behaves close enough. LabeledContent and NavigationStack are defined here
-// under SwiftUI's names, so the views that use them need no change; the rest are modifiers and views with Husk's own names.
+// under SwiftUI's names, so the views that use them need no change; the rest are modifiers and views with DroidRun's own names.
 import SwiftUI
 import UIKit
 
@@ -331,7 +331,7 @@ extension Locale {
 
 // MARK: - pages
 
-/// A page's List on Husk's navy: the page colour behind it and cards for its rows (iOS 15 keeps the system's grouped
+/// A page's List on DroidRun's navy: the page colour behind it and cards for its rows (iOS 15 keeps the system's grouped
 /// background, which it cannot hide).
 struct HuskPageList<Content: View>: View {
     @ViewBuilder var content: Content

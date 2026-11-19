@@ -31,7 +31,7 @@ public final class Services {
         Manifest.Component c = find(i);
         if (c == null) return null;
         new Handler(Looper.getMainLooper()).post(() -> {
-            try { Service s = create(c); s.onStartCommand(i, 0, 1); } catch (Throwable t) { android.util.Log.e("Husk", "service " + c.name + " failed", t); }
+            try { Service s = create(c); s.onStartCommand(i, 0, 1); } catch (Throwable t) { android.util.Log.e("DroidRun", "service " + c.name + " failed", t); }
         });
         return new ComponentName(Native.packageName(), c.name);
     }
@@ -59,7 +59,7 @@ public final class Services {
                 sBound.put(conn, c.name);
                 ComponentName cn = new ComponentName(Native.packageName(), c.name);
                 if (b != null) conn.onServiceConnected(cn, b); else conn.onNullBinding(cn);
-            } catch (Throwable t) { android.util.Log.e("Husk", "binding " + c.name + " failed", t); }
+            } catch (Throwable t) { android.util.Log.e("DroidRun", "binding " + c.name + " failed", t); }
         });
         return true;
     }
@@ -80,7 +80,7 @@ public final class Services {
                     p.huskExtras = j.getExtras();
                     ((android.app.job.JobService) s).onStartJob(p);
                 } else s.onStartCommand(new Intent().setComponent(cn), 0, 1);
-            } catch (Throwable t) { android.util.Log.e("Husk", "job " + cn.getClassName() + " failed", t); }
+            } catch (Throwable t) { android.util.Log.e("DroidRun", "job " + cn.getClassName() + " failed", t); }
         });
     }
 

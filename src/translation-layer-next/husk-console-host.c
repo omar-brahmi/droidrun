@@ -233,7 +233,7 @@ bool husk_console_launch(const husk_console_launch_args *a, char *err, size_t er
     }
     /* One game per process: an Android game's engine holds the same JIT region. */
     if (husk_native_loaded_apk && husk_native_loaded_apk()) {
-        snprintf(err, errlen, "another game is already loaded in this session; close Husk and open it again");
+        snprintf(err, errlen, "another game is already loaded in this session; close DroidRun and open it again");
         return false;
     }
     clock_gettime(CLOCK_MONOTONIC, &g_t0);
@@ -244,7 +244,7 @@ bool husk_console_launch(const husk_console_launch_args *a, char *err, size_t er
     husk_console_module_v1_fn entry = (husk_console_module_v1_fn)dlsym(lib, "husk_console_module_v1");
     const HuskConsoleModuleV1 *m = entry ? entry() : NULL;
     if (!m || m->version != HUSK_CONSOLE_ABI_VERSION || m->struct_size < offsetof(HuskConsoleModuleV1, install_package)) {
-        snprintf(err, errlen, "%s is not a console module this Husk understands", a->module_path);
+        snprintf(err, errlen, "%s is not a console module this DroidRun understands", a->module_path);
         return false;
     }
 

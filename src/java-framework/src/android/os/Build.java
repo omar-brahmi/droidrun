@@ -11,7 +11,7 @@ public class Build {
     public static String getRadioVersion() { return ""; }
     public static boolean is64BitAbi(String abi) { return abi != null && abi.contains("64"); }
     public static boolean isBuildConsistent() { return true; }
-    public static final String FINGERPRINT = "google/shiba/shiba:14/UP1A.231105.001/11000000:user/release-keys", HOST = "husk", USER = "husk";
+    public static final String FINGERPRINT = "google/shiba/shiba:14/UP1A.231105.001/11000000:user/release-keys", HOST = "droidrun", USER = "droidrun";
     public static final String SERIAL = "unknown", BOOTLOADER = "unknown", RADIO = "unknown";
     public static final String CPU_ABI = "arm64-v8a", CPU_ABI2 = "armeabi-v7a";
     public static final String[] SUPPORTED_ABIS = { "arm64-v8a", "armeabi-v7a", "armeabi" }, SUPPORTED_64_BIT_ABIS = { "arm64-v8a" }, SUPPORTED_32_BIT_ABIS = { "armeabi-v7a", "armeabi" };

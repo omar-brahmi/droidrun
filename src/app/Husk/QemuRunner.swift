@@ -193,7 +193,7 @@ final class QemuRunner: ObservableObject {
             + (customResolution.map { "+\($0.w)x\($0.h)" } ?? "")
     }
 
-    /// Whether Husk saves the machine on its own once Android settles.
+    /// Whether DroidRun saves the machine on its own once Android settles.
     ///
     /// On by default, because a machine that is never saved cold-boots every
     /// launch. Off is for when the save itself is the problem -- it fires while
@@ -490,7 +490,7 @@ final class QemuRunner: ObservableObject {
                               + "resources are live while the machine is written")
             // Named services, never a blanket `stop`.
             //
-            // `stop` acts on whole init classes, and Husk's own command bridge
+            // `stop` acts on whole init classes, and DroidRun's own command bridge
             // is an init service too -- stopping it would take away the only
             // channel able to start anything again, leaving a black screen and
             // no way back. ctl.stop names one service and can only ever affect
@@ -1055,7 +1055,7 @@ final class QemuRunner: ObservableObject {
         // the arm64only build, because that is the configuration the image is
         // actually tested in -- including on iOS under UTM, which like us has no
         // hypervisor and runs TCG. Deviating from it is how the last three days
-        // went, so the deviations here are only the ones Husk structurally needs:
+        // went, so the deviations here are only the ones DroidRun structurally needs:
         // our own display bridge, our own serial capture, and a memory budget
         // that fits iOS's jetsam ceiling rather than their flat 2048.
         return [
@@ -1136,7 +1136,7 @@ final class QemuRunner: ObservableObject {
             //         unprovisioned LineageOS runs adbd in trade-in mode, where
             //         every shell is refused, and provisioning it from outside
             //         is the problem this bridge exists to solve.
-            //   5599  Husk's own bridge -- a plain nc listener started by init
+            //   5599  DroidRun's own bridge -- a plain nc listener started by init
             //         as u:r:shell:s0, which hands whatever is written to it to
             //         /system/bin/sh. That is the same authority adb shell has,
             //         obtained without adbd's cooperation.
@@ -1353,7 +1353,7 @@ final class QemuRunner: ObservableObject {
         if QemuRunner.glProven {
             // This used to say the GPU and fast relaunch were mutually
             // exclusive, because QEMU refuses to snapshot a virgl machine:
-            // "virgl is not yet migratable". Husk now lifts that blocker and
+            // "virgl is not yet migratable". DroidRun now lifts that blocker and
             // saves with the Android framework stopped, so the only host GPU
             // state left is state nothing will miss. See the virtio-gpu patches
             // in scripts/integrate_husk.sh for why that is sound.
@@ -1403,7 +1403,7 @@ final class QemuRunner: ObservableObject {
         var argv: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) }
         argv.append(nil)
 
-        // Waive virgl's migration blocker. Husk's patched virtio-gpu-base.c
+        // Waive virgl's migration blocker. DroidRun's patched virtio-gpu-base.c
         // keeps the blocker for everyone who does not set this, because it is
         // only safe alongside the stop-the-framework-before-saving discipline
         // in saveState().

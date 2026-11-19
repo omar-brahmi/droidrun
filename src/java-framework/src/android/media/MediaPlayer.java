@@ -154,7 +154,7 @@ public class MediaPlayer implements AudioRouting {
     public void setDataSource(FileDescriptor fd, long offset, long length) throws java.io.IOException {
         checkIdle();
         int n = husk.Audio.fdOf(fd);
-        if (n < 0) throw new java.io.IOException("not a file descriptor Husk can read");
+        if (n < 0) throw new java.io.IOException("not a file descriptor DroidRun can read");
         mFd = n; mFdObj = fd; mFdOff = offset; mFdLen = length; mState = INITIALIZED;
     }
     public void setDataSource(AssetFileDescriptor afd) throws java.io.IOException {

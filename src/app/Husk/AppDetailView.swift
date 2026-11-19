@@ -29,35 +29,35 @@ enum LibraryRoute: Hashable {
     @Published var platform: PlatformFilter = .all
     /// Downloads, as a sheet: Home's Downloads tile opens it.
     @Published var showDownloads = false
-    /// The Husk account's profile page.
+    /// The DroidRun account's profile page.
     @Published var showProfile = false
     /// Import APK: pick a file, or get one from a link or the Store.
     @Published var showImport = false
-    /// A game link (husk://game/<package>) for something not added yet: the Store opens its page.
+    /// A game link (droidrun://game/<package>) for something not added yet: the Store opens its page.
     @Published var storePackage: String?
     /// Android's storage, as a sheet over whatever is showing.
     @Published var showFiles = false
     /// Directories pushed on top of the Files root.
     @Published var files: [String] = []
-    /// Android has been started in this run of Husk.
+    /// Android has been started in this run of DroidRun.
     @Published var androidStarted = false
     /// An Android app to open as soon as Android is up: asked for from its page while Android was off.
     @Published var pendingAndroidLaunch: String?
 
-    /// A game to start as soon as its page is up: the one Husk was closed to switch to (see `switchTo`).
+    /// A game to start as soon as its page is up: the one DroidRun was closed to switch to (see `switchTo`).
     @Published var autoPlay: String?
 
     private static let switchKey = "husk.switchToGame"
 
-    /// Only one game can be loaded per run of Husk. Closing Husk to play another remembers which, and the next launch opens
+    /// Only one game can be loaded per run of DroidRun. Closing DroidRun to play another remembers which, and the next launch opens
     /// its page and starts it, so switching is: close, open, playing.
     func switchTo(_ appID: String) { UserDefaults.standard.set(appID, forKey: Self.switchKey) }
 
-    /// At launch: the game Husk was closed to switch to, opened and started.
+    /// At launch: the game DroidRun was closed to switch to, opened and started.
     func resumeSwitch() {
         guard let id = UserDefaults.standard.string(forKey: Self.switchKey) else { return }
         UserDefaults.standard.removeObject(forKey: Self.switchKey)
-        HuskLog.log("ui", "opening \(id), which Husk was closed to switch to")
+        HuskLog.log("ui", "opening \(id), which DroidRun was closed to switch to")
         tab = .library
         library = id.hasPrefix("ps4:") ? [.ps4(String(id.dropFirst(4)))] : [.game(id)]
         autoPlay = id
@@ -79,7 +79,7 @@ enum LibraryRoute: Hashable {
         tab = .library
     }
 
-    /// Pick APKs or bundles; Husk then asks where they go.
+    /// Pick APKs or bundles; DroidRun then asks where they go.
     func addSomething() {
         // .folder too: a PS4 game is an extracted folder
         HuskFilePicker.present(types: [.item, .folder]) { urls in IncomingFiles.shared.receive(urls) }
@@ -127,7 +127,7 @@ struct AppDetailView: View {
             Section {
                 LabeledContent("Version", value: live.version ?? "—")
                 LabeledContent("Size", value: live.sizeBytes.map(Self.bytes) ?? "—")
-                LabeledContent("Last Used", value: live.lastUsed.map(Self.when) ?? "Never from Husk")
+                LabeledContent("Last Used", value: live.lastUsed.map(Self.when) ?? "Never from DroidRun")
             }
 
             Section {
@@ -205,7 +205,7 @@ struct AppDetailView: View {
     }
 
     /// Android's own page for the app — permissions, storage, force stop. It
-    /// is a screen Android already has and Husk should not be reimplementing.
+    /// is a screen Android already has and DroidRun should not be reimplementing.
     private func appInfo() {
         let pkg = app.name
         DispatchQueue.global(qos: .userInitiated).async {

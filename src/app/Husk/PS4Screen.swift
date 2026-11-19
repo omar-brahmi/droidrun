@@ -192,7 +192,7 @@ struct PS4PlayView: View {
             model.start()
         }
         // iOS refuses GPU work from the background and the game's device would be lost: pause it
-        // while Husk is not in front (app switcher, Control Center, a call).
+        // while DroidRun is not in front (app switcher, Control Center, a call).
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             husk_console_set_paused(true)
         }

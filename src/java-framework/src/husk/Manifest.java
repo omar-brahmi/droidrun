@@ -154,7 +154,7 @@ public final class Manifest {
                 }
                 }
             }
-        } catch (Exception e) { android.util.Log.e("Husk", "the manifest could not be read", e); }
+        } catch (Exception e) { android.util.Log.e("DroidRun", "the manifest could not be read", e); }
     }
     public static Component activity(String cls) { read(); for (Component c : activities) if (c.name.equals(cls)) return c; return null; }
     public static Component launcher() {

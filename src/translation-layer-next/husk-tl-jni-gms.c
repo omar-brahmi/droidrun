@@ -169,7 +169,7 @@ static void BC_startConnection(tl_jcall *c)
 {
     once("Play Billing: connection finished with BILLING_UNAVAILABLE");
     deliver(c->args[0].l, "com/android/billingclient/api/BillingClientStateListener", "onBillingSetupFinished",
-            "(Lcom/android/billingclient/api/BillingResult;)V", billing_result(BILLING_UNAVAILABLE, "Google Play Billing is not available in Husk"));
+            "(Lcom/android/billingclient/api/BillingResult;)V", billing_result(BILLING_UNAVAILABLE, "Google Play Billing is not available in DroidRun"));
 }
 static void BC_isFeatureSupported(tl_jcall *c) { c->ret = vl(billing_result(BILLING_UNAVAILABLE, "")); }
 static void BR_code(tl_jcall *c) { c->ret = tl_jni_get_field(c->self, "code", "I"); }
@@ -245,7 +245,7 @@ static void JRC_init3(tl_jcall *c)
     jobj *task = c->args[0].l;
     tl_jni_set_field(c->self, "callbackFn", "J", c->args[1]);
     tl_jni_set_field(c->self, "callbackData", "J", c->args[2]);
-    if (!task || strcmp(tl_jni_class_name(task), TASK)) { jrc_deliver(c->self, NULL, false, false, "Google Play services task not available in Husk"); return; }
+    if (!task || strcmp(tl_jni_class_name(task), TASK)) { jrc_deliver(c->self, NULL, false, false, "Google Play services task not available in DroidRun"); return; }
     jobj *ex = tl_jni_get_field(task, "exception", "Ljava/lang/Exception;").l;
     jrc_deliver(c->self, tl_jni_get_field(task, "result", "Ljava/lang/Object;").l, ok(task), false,
                 ex ? tl_jni_string(tl_jni_get_field(ex, "message", "Ljava/lang/String;").l) : NULL);

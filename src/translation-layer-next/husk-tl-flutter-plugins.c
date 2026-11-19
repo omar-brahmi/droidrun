@@ -238,8 +238,8 @@ static sv *device_info(void)
 {
     static const char *const keys[] = { "brand", "device", "display", "fingerprint", "hardware", "host", "id", "manufacturer", "model",
                                         "product", "tags", "type", "bootloader", "board" };
-    static const char *const vals[] = { "husk", "husk", "Husk", "husk/husk/husk:16/HUSK/1:user/release-keys", "husk", "husk", "HUSK",
-                                        "Husk", "Husk", "husk", "release-keys", "user", "unknown", "husk" };
+    static const char *const vals[] = { "droidrun", "droidrun", "DroidRun", "droidrun/droidrun/droidrun:16/DROIDRUN/1:user/release-keys", "droidrun", "droidrun", "DROIDRUN",
+                                        "DroidRun", "DroidRun", "droidrun", "release-keys", "user", "unknown", "droidrun" };
     size_t nk = sizeof(keys) / sizeof(keys[0]);
     sv *version = sv_map(7);
     sv_map_set(version, 0, sv_string("sdkInt"), sv_int(36));
@@ -266,7 +266,7 @@ static sv *device_info(void)
     sv_map_set(m, i++, sv_string("systemFeatures"), sv_list(0));
     sv_map_set(m, i++, sv_string("isLowRamDevice"), sv_bool(false));
     sv_map_set(m, i++, sv_string("serialNumber"), sv_string("unknown"));
-    sv_map_set(m, i++, sv_string("name"), sv_string("Husk"));
+    sv_map_set(m, i++, sv_string("name"), sv_string("DroidRun"));
     sv_map_set(m, i++, sv_string("time"), sv_int((int64_t)now.tv_sec * 1000));
     sv_map_set(m, i++, sv_string("totalDiskSize"), sv_int(disk_total));
     sv_map_set(m, i++, sv_string("freeDiskSize"), sv_int(disk_free));

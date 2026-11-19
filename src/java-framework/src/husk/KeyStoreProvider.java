@@ -21,7 +21,7 @@ import javax.crypto.spec.SecretKeySpec;
 public final class KeyStoreProvider extends Provider {
     public static final String NAME = "AndroidKeyStore";
     public KeyStoreProvider() {
-        super(NAME, 1.0, "Husk's AndroidKeyStore");
+        super(NAME, 1.0, "DroidRun's AndroidKeyStore");
         put("KeyStore.AndroidKeyStore", Store.class.getName());
         for (String a : new String[] { "AES", "HmacSHA1", "HmacSHA224", "HmacSHA256", "HmacSHA384", "HmacSHA512", "DESede" }) put("KeyGenerator." + a, SecretGen.class.getName() + "$" + a.replace("Hmac", "H"));
         put("KeyPairGenerator.RSA", PairGen.class.getName() + "$RSA");
@@ -36,8 +36,8 @@ public final class KeyStoreProvider extends Provider {
     public static synchronized void install() {
         if (sInstalled) return;
         sInstalled = true;
-        try { Security.addProvider(new KeyStoreProvider()); } catch (Throwable t) { android.util.Log.w("Husk", "AndroidKeyStore not installed: " + t); }
-        try { Security.addProvider(new BCWorkaround()); } catch (Throwable t) { android.util.Log.w("Husk", "AndroidKeyStoreBCWorkaround not installed: " + t); }
+        try { Security.addProvider(new KeyStoreProvider()); } catch (Throwable t) { android.util.Log.w("DroidRun", "AndroidKeyStore not installed: " + t); }
+        try { Security.addProvider(new BCWorkaround()); } catch (Throwable t) { android.util.Log.w("DroidRun", "AndroidKeyStoreBCWorkaround not installed: " + t); }
     }
 
     // ---- the keys: alias -> key (and for a pair, its public key), kept in a file of the app's
@@ -56,13 +56,13 @@ public final class KeyStoreProvider extends Provider {
         File f = file();
         if (f.isFile()) {
             try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(f))) { sKeys = (LinkedHashMap<String, Entry>) in.readObject(); }
-            catch (Exception e) { android.util.Log.w("Husk", "AndroidKeyStore: could not read the keys: " + e); }
+            catch (Exception e) { android.util.Log.w("DroidRun", "AndroidKeyStore: could not read the keys: " + e); }
         }
         return sKeys;
     }
     static synchronized void save() {
         try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(file()))) { out.writeObject(sKeys); }
-        catch (Exception e) { android.util.Log.w("Husk", "AndroidKeyStore: could not save the keys: " + e); }
+        catch (Exception e) { android.util.Log.w("DroidRun", "AndroidKeyStore: could not save the keys: " + e); }
     }
     static synchronized void put(String alias, Entry e) { huskKeys().put(alias, e); save(); }
 
@@ -73,7 +73,7 @@ public final class KeyStoreProvider extends Provider {
         @Override public byte[] getEncoded() { return mKey.getEncoded(); }
         @Override public void verify(PublicKey key) {}
         @Override public void verify(PublicKey key, String sigProvider) {}
-        @Override public String toString() { return "Husk key certificate (" + mKey.getAlgorithm() + ")"; }
+        @Override public String toString() { return "DroidRun key certificate (" + mKey.getAlgorithm() + ")"; }
         @Override public PublicKey getPublicKey() { return mKey; }
     }
 
@@ -238,7 +238,7 @@ public final class KeyStoreProvider extends Provider {
             "RSA/ECB/OAEPWithSHA-224AndMGF1Padding", "RSA/ECB/OAEPWithSHA-256AndMGF1Padding", "RSA/ECB/OAEPWithSHA-384AndMGF1Padding",
             "RSA/ECB/OAEPWithSHA-512AndMGF1Padding", "DESede/CBC/NoPadding", "DESede/CBC/PKCS7Padding", "DESede/ECB/NoPadding", "DESede/ECB/PKCS7Padding" };
         public BCWorkaround() {
-            super("AndroidKeyStoreBCWorkaround", 1.0, "Husk's AndroidKeyStore ciphers");
+            super("AndroidKeyStoreBCWorkaround", 1.0, "DroidRun's AndroidKeyStore ciphers");
             for (int i = 0; i < CIPHERS.length; i++) put("Cipher." + CIPHERS[i], Delegate.class.getName() + "$C" + i);
         }
     }

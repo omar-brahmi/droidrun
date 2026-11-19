@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// husk://game/<package>, from a game's page on the website ("Open in Husk"): its page here when it is added, else the Store's.
+// droidrun://game/<package>, from a game's page on the website ("Open in DroidRun"): its page here when it is added, else the Store's.
 import Foundation
 
 @MainActor enum GameLink {
     static func handle(_ url: URL) -> Bool {
-        guard url.scheme == "husk", url.host == "game" || url.host == "app" else { return false }
+        guard url.scheme == "droidrun", url.host == "game" || url.host == "app" else { return false }
         let id = url.lastPathComponent
         guard !id.isEmpty, id != "/" else { return true }
         let router = Router.shared

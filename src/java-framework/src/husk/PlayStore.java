@@ -35,7 +35,7 @@ final class PlayStore {
             if (data.readInt() != 0) Bundle.CREATOR.createFromParcel(data);
             IBinder callback = data.readStrongBinder();
             if (callback == null) return true;
-            android.util.Log.d("Husk", "Play Age Signals asked: answering that no age signal applies");
+            android.util.Log.d("DroidRun", "Play Age Signals asked: answering that no age signal applies");
             Parcel p = Parcel.obtain();
             p.writeInterfaceToken(CALLBACK);
             p.writeInt(1);

@@ -6,7 +6,7 @@ import UIKit
 
 /// The developer certificate JIT-less mode signs a game's converted libraries with (JITLess.swift). iOS loads a library in a
 /// sideloaded app only when it is signed by the same team as the app, so this has to be the certificate SideStore or AltStore
-/// installed Husk with. It comes from the store itself (it hands it over through a URL callback) or from a .p12 file and its
+/// installed DroidRun with. It comes from the store itself (it hands it over through a URL callback) or from a .p12 file and its
 /// password. Kept in the Keychain; nothing leaves the device.
 @MainActor
 final class SigningCertificate: ObservableObject {
@@ -22,8 +22,8 @@ final class SigningCertificate: ObservableObject {
     @Published private(set) var info: Info?
     @Published var lastError: String?
 
-    private static let service = "com.husk.signing"
-    private static let callbackScheme = "husk"
+    private static let service = "com.droidrun.signing"
+    private static let callbackScheme = "droidrun"
     private static let callbackHost = "certificate"
 
     private init() { info = Self.loadStored().flatMap { Self.open($0.p12, $0.password)?.info } }
@@ -50,8 +50,8 @@ final class SigningCertificate: ObservableObject {
             return
         }
         if let team = Self.installedTeamID, team != opened.info.teamID {
-            lastError = "This certificate belongs to team \(opened.info.teamID), but Husk was installed with team \(team). "
-                      + "Use the certificate of the Apple ID that installed Husk."
+            lastError = "This certificate belongs to team \(opened.info.teamID), but DroidRun was installed with team \(team). "
+                      + "Use the certificate of the Apple ID that installed DroidRun."
             return
         }
         guard Self.store(data, opened.password) else { lastError = "The certificate could not be saved in the Keychain."; return }
@@ -60,7 +60,7 @@ final class SigningCertificate: ObservableObject {
         HuskLog.log("sign", "certificate imported: team \(opened.info.teamID), expires \(opened.info.expires)")
     }
 
-    /// Ask SideStore or AltStore for the certificate it signs Husk with; it answers by opening husk://certificate?cert=…&password=…
+    /// Ask SideStore or AltStore for the certificate it signs DroidRun with; it answers by opening droidrun://certificate?cert=…&password=…
     func requestFromStore(_ store: Store) {
         let callback = "\(Self.callbackScheme)://\(Self.callbackHost)?cert=$(BASE64_CERT)&password=$(PASSWORD)"
         guard let encoded = callback.addingPercentEncoding(withAllowedCharacters: .alphanumerics),
@@ -71,7 +71,7 @@ final class SigningCertificate: ObservableObject {
         }
     }
 
-    /// husk://certificate?cert=<base64>&password=<password>, from SideStore or AltStore. False when the URL is not one.
+    /// droidrun://certificate?cert=<base64>&password=<password>, from SideStore or AltStore. False when the URL is not one.
     func handle(_ url: URL) -> Bool {
         guard url.scheme?.lowercased() == Self.callbackScheme, url.host?.lowercased() == Self.callbackHost else { return false }
         // Split the raw query so '+' stays '+' (URLComponents turns it into a space, which breaks base64 and passwords).
@@ -109,7 +109,7 @@ final class SigningCertificate: ObservableObject {
         var scheme: String { self == .sideStore ? "sidestore" : "altstore-classic" }
     }
 
-    // MARK: - the team Husk was installed with
+    // MARK: - the team DroidRun was installed with
 
     /// From the provisioning profile the sideloader embedded; nil when there is none (TrollStore, a development build).
     nonisolated static var installedTeamID: String? {

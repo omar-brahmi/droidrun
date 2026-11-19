@@ -6,7 +6,7 @@ import SwiftUI
 /// Before a start it answers the questions the files can: is this an app at all, does it have code for this iPhone's CPU, is a
 /// part of it missing, does it carry protection that refuses to run anywhere but a certified Android phone. After a run it reads
 /// the log for the line that ended it: a crash in one of the app's libraries, the app closing itself, an exception from its Java
-/// code, a feature of Android that Husk does not have yet, Google Play services it cannot do without.
+/// code, a feature of Android that DroidRun does not have yet, Google Play services it cannot do without.
 struct AppDiagnosis: Identifiable, Equatable {
     enum Kind: String {
         case badAPK, unsupportedCPU, missingSplits, protected, needsGoogle, missingFeature, javaCrash, nativeCrash, closedItself,
@@ -52,25 +52,25 @@ struct AppDiagnosis: Identifiable, Equatable {
         guard let r = app.report else { return nil }
         if !r.ok || r.verdict == "unreadable" {
             return AppDiagnosis(kind: .badAPK, title: "Bad APK",
-                                detail: "This file is not an app Husk can read" + (r.error.map { ": \($0)." } ?? ".")
+                                detail: "This file is not an app DroidRun can read" + (r.error.map { ": \($0)." } ?? ".")
                                     + " It may be damaged, only partly downloaded, or not an Android app at all.",
                                 evidence: r.error ?? r.summary)
         }
         if r.verdict == "noArm64" {
             return AppDiagnosis(kind: .unsupportedCPU, title: "Not supported: wrong kind of CPU code",
-                                detail: r.summary + " Husk runs ARM (arm64 and 32-bit ARM translated to arm64). Look for an ARM build of this app.",
+                                detail: r.summary + " DroidRun runs ARM (arm64 and 32-bit ARM translated to arm64). Look for an ARM build of this app.",
                                 evidence: "ABIs: " + r.abis.joined(separator: ", "))
         }
         if app.apks.count == 1, let base = app.apks.first, husk_apk_split_required(base) != 0 {
             return AppDiagnosis(kind: .missingSplits, title: "Incomplete app",
                                 detail: "This app is published in several pieces (split APKs) and only its base was imported, so its libraries or "
-                                    + "resources are missing. Import the whole bundle (.apks, .xapk or .apkm), or get it from Husk's store.",
+                                    + "resources are missing. Import the whole bundle (.apks, .xapk or .apkm), or get it from DroidRun's store.",
                                 evidence: "manifest: split APKs required")
         }
         if let lib = r.libraries.first(where: { l in protectorLibraries.contains(where: { l.name.hasPrefix($0) }) }) {
             return AppDiagnosis(kind: .protected, title: "Protected app",
                                 detail: "This app carries anti-tamper protection (\(lib.name)). Such protection checks that it runs on a certified "
-                                    + "Android phone and closes the app otherwise, so it may not start in Husk.",
+                                    + "Android phone and closes the app otherwise, so it may not start in DroidRun.",
                                 evidence: lib.name)
         }
         return nil
@@ -86,12 +86,12 @@ struct AppDiagnosis: Identifiable, Equatable {
         // libraries, so everything after (java.lang.System failing to initialise, missing natives) follows from this
         if let l = lines.first(where: { $0.contains("no StikDebug JIT region") }) {
             return AppDiagnosis(kind: .noJIT, title: "JIT is not enabled",
-                                detail: "This iPhone only lets an app run translated code while a debugger enables JIT for it. Open Husk "
-                                    + "through StikDebug, or tap Turn On JIT in Husk, then start the app again.",
+                                detail: "This iPhone only lets an app run translated code while a debugger enables JIT for it. Open DroidRun "
+                                    + "through StikDebug, or tap Turn On JIT in DroidRun, then start the app again.",
                                 evidence: l)
         }
 
-        // iOS closed Husk for memory: the runtime's last readings ("N MiB left before jetsam") had fallen to almost nothing. Checked
+        // iOS closed DroidRun for memory: the runtime's last readings ("N MiB left before jetsam") had fallen to almost nothing. Checked
         // before what the log said earlier in the run, which may only be a warning (#175: an OBB note, then an out-of-memory end).
         let left = lines.suffix(40).compactMap { l -> Int? in
             guard let r = l.range(of: " MiB left before jetsam") else { return nil }
@@ -99,7 +99,7 @@ struct AppDiagnosis: Identifiable, Equatable {
         }
         if let last = left.last, last < 80 {
             return AppDiagnosis(kind: .noProgress, title: "Ran out of memory",
-                                detail: "iOS closed Husk because the game used all the memory it allows an app (\(last) MiB were left). "
+                                detail: "iOS closed DroidRun because the game used all the memory it allows an app (\(last) MiB were left). "
                                     + "Close other apps and try again; lower graphics settings in the game help. On SideStore or AltStore, "
                                     + "GetMoreRam raises the limit.",
                                 evidence: lines.last { $0.contains("left before jetsam") })
@@ -108,22 +108,22 @@ struct AppDiagnosis: Identifiable, Equatable {
         // The JIT region is shared: Android (QEMU) holds its top half while it runs, an app's libraries fill it from the bottom
         if let l = lines.first(where: { $0.contains("but QEMU holds its top") || $0.contains("of TCG") && $0.contains("no room for") }) {
             return AppDiagnosis(kind: .noJIT, title: "Not enough JIT memory",
-                                detail: "Android and this app share the memory Husk runs translated code in, and together they do not fit. "
-                                    + "Close Husk and open it again, then start only the app (or only Android).",
+                                detail: "Android and this app share the memory DroidRun runs translated code in, and together they do not fit. "
+                                    + "Close DroidRun and open it again, then start only the app (or only Android).",
                                 evidence: l)
         }
 
         // Out of address space, not memory: a reservation of address space was refused (an allocator's PROT_NONE mmap failing with
         // ENOMEM), and the engine gave up. Unity's own allocators reserve 256 MiB regions, as 512 MiB each, far ahead of use; an iOS
         // app without the extended-virtual-addressing entitlement has a few GiB of address space, and installs re-signed with their
-        // user's own team often lose it. What follows the refusal (a crash, iOS closing Husk) follows from it.
+        // user's own team often lose it. What follows the refusal (a crash, iOS closing DroidRun) follows from it.
         if let i = lines.firstIndex(where: { $0.contains("mmap FAILED") && $0.contains(" prot=0 ") && $0.contains("errno=12") }),
            let oom = lines[i...].first(where: { $0.contains("System out of memory!") }) {
             return AppDiagnosis(kind: .outOfAddressSpace, title: String(localized: "Out of address space"),
                                 detail: String(localized: """
                                         The game ran out of address space, not memory: iOS refused to set aside more addresses for it. An app \
                                         without the extended virtual addressing entitlement gets only a few GB of addresses, and installs \
-                                        re-signed with your own Apple account or team often lose that entitlement. Install Husk with it kept, \
+                                        re-signed with your own Apple account or team often lose that entitlement. Install DroidRun with it kept, \
                                         then start the game again.
                                         """),
                                 evidence: lines[i] + "\n" + oom)
@@ -137,10 +137,10 @@ struct AppDiagnosis: Identifiable, Equatable {
                 return l.split(separator: " ").map(String.init).first { $0.hasSuffix(".so") || $0.contains(".so") }
             }.first
             let signal = head.range(of: "signal \\d+", options: .regularExpression).map { String(head[$0]) } ?? "a fatal signal"
-            if let lib, !lib.hasPrefix("libhusk"), !lib.contains("Husk") {
+            if let lib, !lib.hasPrefix("libhusk"), !lib.contains("DroidRun") {
                 return AppDiagnosis(kind: .nativeCrash, title: "Crashed in \(lib)",
                                     detail: "The app's own native code (\(lib)) stopped with \(signal). It most likely needs something from Android "
-                                        + "that Husk does not provide yet, or does something iOS does not allow.",
+                                        + "that DroidRun does not provide yet, or does something iOS does not allow.",
                                     evidence: head)
             }
             return AppDiagnosis(kind: .nativeCrash, title: "The app crashed",
@@ -153,7 +153,7 @@ struct AppDiagnosis: Identifiable, Equatable {
             let lib = l.components(separatedBy: "called from ").last?.split(separator: " ").first.map(String.init) ?? "its code"
             return AppDiagnosis(kind: .closedItself, title: "The app refused to run here",
                                 detail: "\(lib) closed the app on purpose (\(code)). Apps with anti-tamper or anti-cheat protection do this when "
-                                    + "they find they are not on a certified Android phone, which Husk cannot pretend to be for them.",
+                                    + "they find they are not on a certified Android phone, which DroidRun cannot pretend to be for them.",
                                 evidence: l)
         }
 
@@ -166,8 +166,8 @@ struct AppDiagnosis: Identifiable, Equatable {
             let firstPart = message.components(separatedBy: " | caused by").first ?? String(message)
             if ["NoSuchMethodError", "NoClassDefFoundError", "UnsatisfiedLinkError", "AbstractMethodError", "NoSuchFieldError",
                 "IncompatibleClassChangeError"].contains(short) {
-                return AppDiagnosis(kind: .missingFeature, title: "Uses something Husk does not have yet",
-                                    detail: "The app needs a part of Android that Husk's runtime does not provide yet: \(apiName(firstPart)).",
+                return AppDiagnosis(kind: .missingFeature, title: "Uses something DroidRun does not have yet",
+                                    detail: "The app needs a part of Android that DroidRun's runtime does not provide yet: \(apiName(firstPart)).",
                                     evidence: l)
             }
             if what.localizedCaseInsensitiveContains("google play services") || what.contains("GooglePlayServices") {
@@ -192,7 +192,7 @@ struct AppDiagnosis: Identifiable, Equatable {
             let prog = l.components(separatedBy: "the app started a process: ").last?.components(separatedBy: " -- ").first ?? "a program"
             return AppDiagnosis(kind: .missingFeature, title: "Runs Linux programs as separate processes",
                                 detail: "This app does its main work in Linux programs it starts as processes of their own (here \(prog.prefix(120))). "
-                                    + "Its own screens run in Husk, but iOS does not let an app start other processes, so those programs, and the "
+                                    + "Its own screens run in DroidRun, but iOS does not let an app start other processes, so those programs, and the "
                                     + "games or tools they run, can not start yet.",
                                 evidence: l)
         }
@@ -201,7 +201,7 @@ struct AppDiagnosis: Identifiable, Equatable {
         if let l = lines.last(where: { $0.contains("ChooseTypeAndAccountActivity") || $0.contains("AccountManager.newChooseAccountIntent") }),
            lines.contains(where: { $0.contains("the app finished") }) {
             return AppDiagnosis(kind: .needsGoogle, title: "Needs a Google account",
-                                detail: "This app only works signed in to a Google account. It asked Android to pick one, and Husk has no Google "
+                                detail: "This app only works signed in to a Google account. It asked Android to pick one, and DroidRun has no Google "
                                     + "accounts to offer, so the app closed.",
                                 evidence: l)
         }
@@ -210,30 +210,30 @@ struct AppDiagnosis: Identifiable, Equatable {
         if let l = lines.first(where: { $0.contains("expansion file (OBB) is missing") }) {
             return AppDiagnosis(kind: .missingSplits, title: "Missing game data",
                                 detail: "This game keeps most of its data in an expansion file (OBB) that the Play Store downloads separately "
-                                    + "from the app. Husk installed the app itself but not that file, so the game cannot load.",
+                                    + "from the app. DroidRun installed the app itself but not that file, so the game cannot load.",
                                 evidence: l)
         }
 
         // Video that only plays with DRM keys
-        if let l = lines.first(where: { $0.contains("Husk cannot decrypt protected media") }) {
+        if let l = lines.first(where: { $0.contains("DroidRun cannot decrypt protected media") }) {
             return AppDiagnosis(kind: .protected, title: "Protected video is not supported",
                                 detail: "The app's video is DRM-protected (Widevine), which only certified Android devices can decrypt. "
                                     + "Unprotected video plays; protected video stays black.",
                                 evidence: l)
         }
 
-        // A function of Android's C library or system libraries that was never written for Husk
+        // A function of Android's C library or system libraries that was never written for DroidRun
         if let l = lines.first(where: { $0.contains("CALLED an unresolved import: ") }), lines.contains(where: { $0.contains("the app finished") || $0.contains("CRASH") }) {
             let fn = l.components(separatedBy: "unresolved import: ").last?.split(separator: " ").first.map(String.init) ?? "?"
-            return AppDiagnosis(kind: .missingFunction, title: "Uses something Husk does not have yet",
-                                detail: "The app called \(fn), a system function Husk does not provide yet.", evidence: l)
+            return AppDiagnosis(kind: .missingFunction, title: "Uses something DroidRun does not have yet",
+                                detail: "The app called \(fn), a system function DroidRun does not provide yet.", evidence: l)
         }
         return nil
     }
 
     private static func googleDiagnosis(_ line: String) -> AppDiagnosis {
         AppDiagnosis(kind: .needsGoogle, title: "Needs Google Play services",
-                     detail: "This app relies on Google Play services (Google sign-in, Google's account and device checks) for more than Husk "
+                     detail: "This app relies on Google Play services (Google sign-in, Google's account and device checks) for more than DroidRun "
                         + "can answer for. Apps that only use Google's libraries run; this one stops without the real services.",
                      evidence: line)
     }
@@ -310,13 +310,13 @@ extension AppDiagnosis {
     @MainActor static func writeReport(app: TLApp, diagnosis d: AppDiagnosis) -> URL? {
         let info = Bundle.main.infoDictionary ?? [:]
         var text = """
-        Husk app report
+        DroidRun app report
         ===============
         App      : \(app.label) (\(app.packageName ?? "?"))
         What     : \(d.title)
         Why      : \(d.detail)
         Evidence : \(d.evidence ?? "-")
-        Husk     : \(info["CFBundleShortVersionString"] as? String ?? "?") (\(info["CFBundleVersion"] as? String ?? "?"))
+        DroidRun     : \(info["CFBundleShortVersionString"] as? String ?? "?") (\(info["CFBundleVersion"] as? String ?? "?"))
         Device   : \(HuskLog.deviceModel), \(UIDevice.current.systemName) \(UIDevice.current.systemVersion)
         APKs     : \(app.apks.map { ($0 as NSString).lastPathComponent }.joined(separator: ", "))
         Engine   : \(app.report?.runnerName ?? "?")
@@ -325,7 +325,7 @@ extension AppDiagnosis {
 
         """
         if let c = husk_tl_attempt_log() { text += String(cString: c); free(c) }
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Husk report - \(app.label.replacingOccurrences(of: "/", with: "-")).txt")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("DroidRun report - \(app.label.replacingOccurrences(of: "/", with: "-")).txt")
         do { try text.write(to: url, atomically: true, encoding: .utf8) } catch { return nil }
         return url
     }

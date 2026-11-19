@@ -5,7 +5,7 @@ import UIKit
 
 /// The host half of the host/guest bridge.
 ///
-/// Husk shares a folder with the guest over virtio-9p. Everything crossing the
+/// DroidRun shares a folder with the guest over virtio-9p. Everything crossing the
 /// boundary is a file: APKs go into `inbox/`, commands are JSON in `commands/`,
 /// and the guest writes back `catalog/apps.json`, the icons beside it, and a
 /// result per command.
@@ -69,7 +69,7 @@ final class HuskBridgeFS: ObservableObject {
     }
 
     /// The guest writes a full state dump into the share whenever something looks
-    /// wrong. Folding it into Husk's log means the user never has to open a shell
+    /// wrong. Folding it into DroidRun's log means the user never has to open a shell
     /// and run systemctl to tell us what happened.
     private func loadDiagnostics() {
         let file = shareRoot.appendingPathComponent("diagnostics.txt")
@@ -190,7 +190,7 @@ final class HuskBridgeFS: ObservableObject {
 /// Marking the device provisioned from init did not help either: adbd decides
 /// once, at start, and by then the property is not yet set.
 ///
-/// So Husk stopped asking adbd. The guest image carries an init service that,
+/// So DroidRun stopped asking adbd. The guest image carries an init service that,
 /// on `sys.boot_completed`, runs a plain netcat listener on port 5599 whose
 /// child is `/system/bin/sh`, declared `seclabel u:r:shell:s0` -- the same
 /// domain and the same authority `adb shell` would have given us:
@@ -491,7 +491,7 @@ final class GuestBridge {
         // On the held connection, like everything else.
         //
         // This used to open its own, and that is precisely the operation that
-        // stops working part-way through a session -- so the one thing in Husk
+        // stops working part-way through a session -- so the one thing in DroidRun
         // that most needs a working channel was the one asking for a new one.
         // Budget by size, not by a flat two minutes.
         //
@@ -594,7 +594,7 @@ final class GuestBridge {
     /// Deliberately does NOT probe 5555.
     ///
     /// adbd binds that port and it is forwarded, which makes it an inviting
-    /// control for "is the guest's network up at all". Husk does not use adb --
+    /// control for "is the guest's network up at all". DroidRun does not use adb --
     /// LineageOS keeps adbd in adbd_tradeinmode until setup completes and
     /// refuses every shell in that domain, which is the whole reason husk_agent
     /// exists. Even a connect-only probe would imply a dependency this project
@@ -652,7 +652,7 @@ final class GuestBridge {
         guard !watching else { return }
         watching = true
         Thread.detachNewThread { [weak self] in
-            Thread.current.name = "com.husk.bridge.health"
+            Thread.current.name = "com.droidrun.bridge.health"
             var wasAlive: Bool?
             var ticks = 0
             var lastCrashLine: String?
@@ -682,7 +682,7 @@ final class GuestBridge {
                 //
                 // The kernel serial console carries native tombstones and
                 // nothing else, so a Java-side crash -- the Files app dying, a
-                // media exception -- left no trace anywhere Husk could see. The
+                // media exception -- left no trace anywhere DroidRun could see. The
                 // log said the guest was healthy while an app was crashing on
                 // every launch.
                 //
@@ -785,7 +785,7 @@ final class AndroidHost: ObservableObject {
         var sizeBytes: Int64?
         /// The ABI Android picked for it, shown as "64-bit" or "32-bit".
         var abi: String?
-        /// When it was last opened from Husk. Android's own usage stats need a
+        /// When it was last opened from DroidRun. Android's own usage stats need a
         /// permission a sideloaded app cannot grant itself, so this counts only
         /// the launches that went through here — which is all of them.
         var lastUsed: Date?
@@ -829,7 +829,7 @@ final class AndroidHost: ObservableObject {
         return dir
     }
 
-    /// Throw away every icon Husk has kept, so the next refresh asks Android
+    /// Throw away every icon DroidRun has kept, so the next refresh asks Android
     /// again. The catalogue itself is left alone: the apps are still installed.
     nonisolated static func forgetIcons() {
         try? FileManager.default.removeItem(at: iconDirectory)
@@ -1421,7 +1421,7 @@ final class AndroidHost: ObservableObject {
     /// Whether the guest is awake and unlocked, which installing needs it to be.
     ///
     /// A restored snapshot comes back exactly as it was frozen, so the guest can
-    /// be asleep or sitting on its lock screen while Husk's library looks
+    /// be asleep or sitting on its lock screen while DroidRun's library looks
     /// perfectly normal. `pm` then fails somewhere deep with a message about
     /// packages, and nothing points at the actual cause.
     enum GuestState {
@@ -1614,7 +1614,7 @@ final class AndroidHost: ObservableObject {
                 // worst possible moment to find out.
                 switch AndroidHost.guestState() {
                 case .asleep:
-                    // Waking it is something Husk can do itself, so do it
+                    // Waking it is something DroidRun can do itself, so do it
                     // rather than asking. Unlocking is not.
                     HuskLog.log("bridge", "Android was asleep; waking it to install")
                     _ = try? GuestBridge.shared.shell("input keyevent KEYCODE_WAKEUP")
@@ -1686,7 +1686,7 @@ final class AndroidHost: ObservableObject {
 
                 // Persist it, or it is gone on the next launch.
                 //
-                // Husk restores a saved machine instead of booting, and
+                // DroidRun restores a saved machine instead of booting, and
                 // restoring rewinds the userdata disk to the state the snapshot
                 // was taken in. An app installed after that point lives only in
                 // this session: the library lists it now and will not list it

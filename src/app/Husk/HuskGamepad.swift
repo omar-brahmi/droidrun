@@ -32,7 +32,7 @@ final class HuskGamepads: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
-        // Input while Husk is in the background is not wanted: the game is paused then too.
+        // Input while DroidRun is in the background is not wanted: the game is paused then too.
         GCController.shouldMonitorBackgroundEvents = false
         NotificationCenter.default.addObserver(forName: .GCControllerDidConnect, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.sync() }

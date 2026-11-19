@@ -2,12 +2,12 @@
 import SwiftUI
 import UIKit
 
-/// Husk's visual vocabulary.
+/// DroidRun's visual vocabulary.
 ///
 /// The app is drawn with the system's own materials: grouped lists on the system's grouped background,
 /// the system's tab bar and navigation bars, its label colours, and an accent the user can change
 /// (`AppTheme`). The names below remain so every screen can say what it means ("a surface", "dim text")
-/// without caring which system colour that is today -- but none of them is a colour of Husk's own, so the
+/// without caring which system colour that is today -- but none of them is a colour of DroidRun's own, so the
 /// app is light or dark as the phone is, and as the user pins it.
 ///
 /// The one thing that is not the system's is the chrome over the guest's picture (`huskPanel`,
@@ -166,7 +166,7 @@ struct CircleButton: View {
     }
 }
 
-/// Husk's mark, as drawn by whichever app icon is in use.
+/// DroidRun's mark, as drawn by whichever app icon is in use.
 struct HuskMark: View {
     var size: CGFloat = 32
     @Environment(\.colorScheme) private var scheme

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import Foundation
 
-/// The phone Husk says it is when it talks to Google Play: a Pixel 8 on Android 15.
+/// The phone DroidRun says it is when it talks to Google Play: a Pixel 8 on Android 15.
 ///
 /// Google Play decides which build of an app to hand out -- which processor's libraries, which screen density's split, which
 /// app it will offer at all -- from what a device says about itself when it registers. An arm64 phone with a 1080p screen is

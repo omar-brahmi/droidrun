@@ -3,7 +3,7 @@ import ActivityKit
 import SwiftUI
 import WidgetKit
 
-/// Husk's download progress on the Lock Screen and in the Dynamic Island.
+/// DroidRun's download progress on the Lock Screen and in the Dynamic Island.
 @main
 struct HuskDownloadsWidgets: WidgetBundle {
     var body: some Widget {
@@ -71,7 +71,7 @@ private struct LockScreenView: View {
     }
 }
 
-/// The bar: between the app's updates it runs on the estimated finish time, so it keeps moving while Husk is asleep.
+/// The bar: between the app's updates it runs on the estimated finish time, so it keeps moving while DroidRun is asleep.
 @available(iOS 16.1, *)
 private struct Bar: View {
     let state: HuskDownloadAttributes.ContentState
@@ -108,7 +108,7 @@ private func statePercent(_ s: HuskDownloadAttributes.ContentState) -> String {
 @available(iOS 16.1, *)
 private func stateDetail(_ s: HuskDownloadAttributes.ContentState) -> String {
     let f = ByteCountFormatter()
-    if s.failed { return "Stopped. Open Husk to retry." }
+    if s.failed { return "Stopped. Open DroidRun to retry." }
     if s.finished { return "\(f.string(fromByteCount: s.total)) downloaded" }
     var text = "\(f.string(fromByteCount: s.received)) of \(f.string(fromByteCount: s.total))"
     if s.speed > 1 { text += " · \(f.string(fromByteCount: Int64(s.speed)))/s" }
