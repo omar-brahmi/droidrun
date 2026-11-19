@@ -527,11 +527,13 @@ dvm_native_fn tl_sensors_native(const char *name, const char *sig);
 dvm_native_fn tl_sqlite_native(const char *name, const char *sig);
 dvm_native_fn tl_media_native(const char *name, const char *sig);
 dvm_native_fn tl_web_native(const char *name, const char *sig);
+dvm_native_fn tl_avplayer_native(const char *name, const char *sig);
 bool tl_web_any_visible(void);
 dvm_native_fn dvm_android_native(const char *cls, const char *name, const char *sig)
 {
     if (!strcmp(cls, "husk/Sqlite")) return tl_sqlite_native(name, sig);
     if (!strcmp(cls, "husk/MediaCodecNative")) return tl_media_native(name, sig);
+    if (!strcmp(cls, "husk/AvPlayer")) return tl_avplayer_native(name, sig);
     if (!strcmp(cls, "husk/Web")) return tl_web_native(name, sig);
     if (!strcmp(cls, "husk/Sensors")) return tl_sensors_native(name, sig);
     if (!strcmp(cls, "husk/Gfx")) return tl_gfx_native(name, sig);
@@ -1210,8 +1212,11 @@ bool tl_javaapp_start(const tl_javaapp_config *cfg)
     if (!tl_ld_add_apk(cfg->apk_path)) return false;
     if (!tl_dvm_add_apk(cfg->apk_path)) return false;
     { char lib[1100]; snprintf(lib, sizeof(lib), "%s/lib", A.data); mkdir(lib, 0755); tl_ld_apk_libs(stub_lib, lib); }
-    { pthread_attr_t rt; pthread_attr_init(&rt); pthread_attr_setstacksize(&rt, 64u << 20); A.gl_thread_started = pthread_create(&A.gl_thread, &rt, gl_main, NULL) == 0; }
-    pthread_attr_t at; pthread_attr_init(&at); pthread_attr_setstacksize(&at, 256u << 20);
+    /* Short of address space (no extended-virtual-addressing): smaller reservations for the render and main threads too. */
+    bool tl_mm_address_space_short(void);
+    bool short_va = tl_mm_address_space_short();
+    { pthread_attr_t rt; pthread_attr_init(&rt); pthread_attr_setstacksize(&rt, (short_va ? 16u : 64u) << 20); A.gl_thread_started = pthread_create(&A.gl_thread, &rt, gl_main, NULL) == 0; }
+    pthread_attr_t at; pthread_attr_init(&at); pthread_attr_setstacksize(&at, (short_va ? 64u : 256u) << 20);
     A.app_started = pthread_create(&A.app_thread, &at, app_main, NULL) == 0;
     return A.app_started;
 }

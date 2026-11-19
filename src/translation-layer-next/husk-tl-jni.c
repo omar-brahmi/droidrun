@@ -35,12 +35,19 @@ static uint32_t hash_str(const char *s) { uint32_t h = 2166136261u; while (*s) {
 
 /* --------------------------------------------------------------- objects */
 
+/* Every object is registered with the garbage collector (husk-tl-gc.c), which may collect before the next one is made. */
+void tl_gc_register(jobj *o);
+void tl_gc_before_alloc(void);
+void tl_gc_forget(jobj *o);
+
 static jobj *obj_alloc(uint8_t kind, tl_jclass *cls)
 {
+    tl_gc_before_alloc();
     jobj *o = calloc(1, sizeof(*o));
     o->refs = 1;
     o->kind = kind;
     o->cls = cls;
+    tl_gc_register(o);
     return o;
 }
 
@@ -53,6 +60,7 @@ void tl_jni_unref(jobj *o)
      * know about: nothing is freed here (a tracing collector's job). */
     if (tl_dvm) return;
     if (__atomic_sub_fetch(&o->refs, 1, __ATOMIC_ACQ_REL) != 0) return;
+    tl_gc_forget(o);
     switch (o->kind) {
     case TL_K_STRING: free(o->str.utf8); free(o->str.u16); break;
     case TL_K_PRIM_ARRAY: free(o->arr.data); break;
@@ -165,7 +173,20 @@ jobj *tl_jni_new_string(const char *utf8)
     return o;
 }
 
-const char *tl_jni_string(const jobj *s) { return (s && s->kind == TL_K_STRING) ? s->str.utf8 : NULL; }
+/* A string made from UTF-16 (tl_dvm_string_u16) has no UTF-8 form until something asks: made here once, and kept. */
+char *tl_u16_to_utf8(const uint16_t *s, int32_t n);
+const char *tl_jni_string(const jobj *s)
+{
+    if (!s || s->kind != TL_K_STRING) return NULL;
+    jobj *w = (jobj *)s;
+    char *u = __atomic_load_n(&w->str.utf8, __ATOMIC_ACQUIRE);
+    if (u) return u;
+    static const uint16_t empty[1];
+    char *made = tl_u16_to_utf8(w->str.u16 ? w->str.u16 : empty, w->str.u16 ? w->str.len16 : 0);
+    char *expected = NULL;
+    if (!__atomic_compare_exchange_n(&w->str.utf8, &expected, made, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) { free(made); return expected; }
+    return made;
+}
 
 static uint8_t esz_of(char t)
 {
@@ -574,7 +595,7 @@ static bool string_init_in_place(jobj *self, tl_jmeth *m, const jvalue *args)
     if (!dvm_string_init(m->sig, args, &r) || !r.l) return true;           /* the exception is pending */
     jobj *str = r.l;
     self->kind = TL_K_STRING; self->cls = str->cls;
-    self->str.utf8 = strdup(str->str.utf8 ? str->str.utf8 : "");
+    self->str.utf8 = str->str.u16 ? NULL : strdup(str->str.utf8 ? str->str.utf8 : "");   /* UTF-8 on demand (tl_jni_string) */
     self->str.len16 = str->str.len16; self->str.u16 = NULL;
     if (str->str.u16) { self->str.u16 = malloc((size_t)str->str.len16 * 2 + 2); memcpy(self->str.u16, str->str.u16, (size_t)str->str.len16 * 2); self->str.u16[str->str.len16] = 0; }
     tl_jni_unref(str);

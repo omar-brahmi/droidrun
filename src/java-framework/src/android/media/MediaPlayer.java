@@ -10,7 +10,9 @@ import java.util.Map;
 
 /**
  * Music and other long sounds: the file is decoded as it plays (husk.Audio's decoder: Ogg Vorbis, MP3, AAC, WAV...) into a stream
- * of Husk's mixer, from a thread of the player's own. Video has no picture: its sound still plays.
+ * of Husk's mixer, from a thread of the player's own.
+ * Video, and anything streamed from the network (HLS, live TS, DASH, MP4...), is played by iOS's AVPlayer instead (husk.AvVideo),
+ * its picture drawn into the SurfaceHolder or Surface the app gives (setDisplay/setSurface).
  */
 public class MediaPlayer implements AudioRouting {
     public interface OnCompletionListener { void onCompletion(MediaPlayer mp); }
@@ -39,6 +41,83 @@ public class MediaPlayer implements AudioRouting {
     private float mL = 1, mR = 1;
     private int mSession;
     private OnCompletionListener mOnCompletion; private OnPreparedListener mOnPrepared; private OnErrorListener mOnError; private OnSeekCompleteListener mOnSeek; private OnInfoListener mOnInfo; private MediaPlayer mNext;
+    /* ---- AVPlayer (husk.AvVideo): network media, and anything with a picture */
+    private husk.AvVideo mAv;
+    private String mAvUrl, mPath;
+    private Map<String, String> mAvHeaders;
+    private FileDescriptor mFdObj;
+    private android.view.SurfaceHolder mHolder;
+    private android.view.Surface mSurface;
+    private OnVideoSizeChangedListener mOnSize;
+    private OnBufferingUpdateListener mOnBuffer;
+    private volatile int mVideoW, mVideoH;
+    private volatile boolean mAvBuffering;
+    private int mScaling = VIDEO_SCALING_MODE_SCALE_TO_FIT;
+    private static boolean isStream(String p) {
+        String l = p.toLowerCase(java.util.Locale.ROOT);
+        return l.startsWith("http://") || l.startsWith("https://") || l.startsWith("rtsp://") || l.startsWith("rtmp://");
+    }
+    private boolean wantsAv() { return mAvUrl != null || mHolder != null || mSurface != null; }
+    /** A local source as a file AVPlayer can open: its own path, or a copy of the bytes or descriptor range. */
+    private String localUrl() throws java.io.IOException {
+        if (mPath != null) return mPath;
+        java.io.File f = java.io.File.createTempFile("husk-media", ".mp4");
+        f.deleteOnExit();
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) {
+            if (mBytes != null) out.write(mBytes);
+            else if (mFdObj != null) {
+                java.nio.channels.FileChannel ch = new java.io.FileInputStream(mFdObj).getChannel();
+                long pos = mFdOff, end = mFdLen >= 0 ? mFdOff + mFdLen : ch.size();
+                java.nio.ByteBuffer b = java.nio.ByteBuffer.allocate(1 << 16);
+                while (pos < end) { b.clear(); if (end - pos < b.capacity()) b.limit((int) (end - pos)); int r = ch.read(b, pos); if (r <= 0) break; out.write(b.array(), 0, r); pos += r; }
+            }
+        }
+        return f.getAbsolutePath();
+    }
+    private void openAv(boolean sync) throws java.io.IOException {
+        String url = mAvUrl != null ? mAvUrl : localUrl();
+        final Object ready = new Object();
+        final boolean[] done = new boolean[1];
+        final String[] err = new String[1];
+        husk.AvVideo av = new husk.AvVideo(new husk.AvVideo.Events() {
+            public void onState(int st) {
+                if (st == 3 || st == 4) synchronized (ready) { done[0] = true; ready.notifyAll(); }
+                if (st == 2 && mState == STARTED) { mAvBuffering = true; mMain.post(() -> { if (mOnInfo != null) mOnInfo.onInfo(MediaPlayer.this, MEDIA_INFO_BUFFERING_START, 0); }); }
+                if (st == 3 && mAvBuffering) { mAvBuffering = false; mMain.post(() -> { if (mOnInfo != null) mOnInfo.onInfo(MediaPlayer.this, MEDIA_INFO_BUFFERING_END, 0); }); }
+                if (st == 4 && mState == STARTED) {
+                    if (mLooping) { husk.AvVideo a = mAv; if (a != null) { a.seek(0); a.play(); } return; }
+                    mState = COMPLETED;
+                    mMain.post(() -> {
+                        if (mNext != null) { try { mNext.start(); } catch (IllegalStateException e) {} }
+                        if (mOnCompletion != null) mOnCompletion.onCompletion(MediaPlayer.this);
+                    });
+                }
+            }
+            public void onPlaying(boolean p) {
+                husk.AvVideo a = mAv;
+                if (mOnBuffer != null && a != null) { long d = a.duration(); int pc = d > 0 ? (int) Math.min(100, a.buffered() * 100 / d) : 100; mMain.post(() -> { if (mOnBuffer != null) mOnBuffer.onBufferingUpdate(MediaPlayer.this, pc); }); }
+            }
+            public void onVideoSize(int w, int h) { mVideoW = w; mVideoH = h; mMain.post(() -> { if (mOnSize != null) mOnSize.onVideoSizeChanged(MediaPlayer.this, w, h); }); }
+            public void onFirstFrame() { mMain.post(() -> { if (mOnInfo != null) mOnInfo.onInfo(MediaPlayer.this, MEDIA_INFO_VIDEO_RENDERING_START, 0); }); }
+            public void onError(String why) {
+                android.util.Log.w("MediaPlayer", "AVPlayer: " + why);
+                synchronized (ready) { err[0] = why; done[0] = true; ready.notifyAll(); }
+                mMain.post(() -> fail(MEDIA_ERROR_UNKNOWN, MEDIA_ERROR_IO));
+            }
+        });
+        if (mSurface != null) av.setSurface(mSurface); else if (mHolder != null) av.setDisplay(mHolder);
+        av.setScaleToFill(mScaling == VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
+        av.volume((mL + mR) / 2);
+        synchronized (mLock) { mAv = av; }
+        av.setSource(url, mAvHeaders);
+        android.util.Log.i("MediaPlayer", "played by AVPlayer: " + url);
+        if (!sync) return;
+        long until = System.currentTimeMillis() + 30000;
+        synchronized (ready) { while (!done[0] && System.currentTimeMillis() < until) { try { ready.wait(500); } catch (InterruptedException e) { break; } } }
+        if (err[0] != null) { mState = ERROR; throw new java.io.IOException("Prepare failed.: " + err[0]); }
+        mState = PREPARED;
+    }
+
     public MediaPlayer() { Looper l = Looper.myLooper(); mMain = new Handler(l != null ? l : Looper.getMainLooper()); }
     public MediaPlayer(Context c) { this(); }
     public static MediaPlayer create(Context c, int resId) { return create(c, resId, null, 0); }
@@ -55,28 +134,28 @@ public class MediaPlayer implements AudioRouting {
     private void checkIdle() { if (mState != IDLE) throw new IllegalStateException("setDataSource called in state " + mState); }
     public void setDataSource(String path) throws java.io.IOException {
         checkIdle();
-        if (path.startsWith("http://") || path.startsWith("https://")) { try (java.io.InputStream in = new java.net.URL(path).openStream()) { mBytes = husk.Audio.readAll(in); } }
-        else if (path.startsWith("file://")) setDataSource(path.substring(7));
-        else { try (java.io.FileInputStream in = new java.io.FileInputStream(path)) { mBytes = husk.Audio.readAll(in); } }
+        if (isStream(path)) mAvUrl = path;                                    /* streamed by AVPlayer, not downloaded first */
+        else if (path.startsWith("file://")) { setDataSource(path.substring(7)); return; }
+        else { mPath = path; try (java.io.FileInputStream in = new java.io.FileInputStream(path)) { mBytes = husk.Audio.readAll(in); } }
         mState = INITIALIZED;
     }
-    public void setDataSource(String path, Map<String, String> headers) throws java.io.IOException { setDataSource(path); }
+    public void setDataSource(String path, Map<String, String> headers) throws java.io.IOException { mAvHeaders = headers; setDataSource(path); }
     public void setDataSource(Context c, Uri u) throws java.io.IOException {
         checkIdle();
         String s = u.getScheme();
         if (s == null || "file".equals(s)) { setDataSource(u.getPath()); return; }
-        if ("http".equals(s) || "https".equals(s)) { setDataSource(u.toString()); return; }
+        if ("http".equals(s) || "https".equals(s) || "rtsp".equals(s) || "rtmp".equals(s)) { setDataSource(u.toString()); return; }
         mBytes = husk.Audio.bytesOf(c, u);
         mState = INITIALIZED;
     }
-    public void setDataSource(Context c, Uri u, Map<String, String> headers) throws java.io.IOException { setDataSource(c, u); }
+    public void setDataSource(Context c, Uri u, Map<String, String> headers) throws java.io.IOException { mAvHeaders = headers; setDataSource(c, u); }
     public void setDataSource(Context c, Uri u, Map<String, String> headers, java.util.List<?> cookies) throws java.io.IOException { setDataSource(c, u); }
     public void setDataSource(FileDescriptor fd) throws java.io.IOException { setDataSource(fd, 0, -1); }
     public void setDataSource(FileDescriptor fd, long offset, long length) throws java.io.IOException {
         checkIdle();
         int n = husk.Audio.fdOf(fd);
         if (n < 0) throw new java.io.IOException("not a file descriptor Husk can read");
-        mFd = n; mFdOff = offset; mFdLen = length; mState = INITIALIZED;
+        mFd = n; mFdObj = fd; mFdOff = offset; mFdLen = length; mState = INITIALIZED;
     }
     public void setDataSource(AssetFileDescriptor afd) throws java.io.IOException {
         if (afd.getFileDescriptor() != null && husk.Audio.fdOf(afd.getFileDescriptor()) >= 0) setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
@@ -94,6 +173,7 @@ public class MediaPlayer implements AudioRouting {
     }
     public void prepare() throws java.io.IOException {
         if (mState != INITIALIZED && mState != STOPPED) throw new IllegalStateException("prepare called in state " + mState);
+        if (wantsAv()) { openAv(true); return; }
         open();
     }
     private void open() throws java.io.IOException {
@@ -107,7 +187,7 @@ public class MediaPlayer implements AudioRouting {
         if (mState != INITIALIZED && mState != STOPPED) throw new IllegalStateException("prepareAsync called in state " + mState);
         mState = PREPARING;
         new Thread(() -> {
-            try { open(); mMain.post(() -> { if (mOnPrepared != null) mOnPrepared.onPrepared(this); }); }
+            try { if (wantsAv()) openAv(true); else open(); mMain.post(() -> { if (mOnPrepared != null) mOnPrepared.onPrepared(this); }); }
             catch (java.io.IOException e) { mMain.post(() -> fail(MEDIA_ERROR_UNKNOWN, MEDIA_ERROR_IO)); }
         }, "MediaPlayer prepare").start();
     }
@@ -117,6 +197,12 @@ public class MediaPlayer implements AudioRouting {
         if (!handled && mOnCompletion != null) mOnCompletion.onCompletion(this);
     }
     public void start() {
+        if (mAv != null) {
+            if (mState != PREPARED && mState != PAUSED && mState != COMPLETED && mState != STARTED) throw new IllegalStateException("start called in state " + mState);
+            if (mState == COMPLETED) mAv.seek(0);
+            mAv.play(); mState = STARTED;
+            return;
+        }
         synchronized (mLock) {
             if (mState == COMPLETED) { husk.Audio.decSeek(mDec, 0); resetPosition(0); }
             if (mState != PREPARED && mState != PAUSED && mState != COMPLETED && mState != STARTED) throw new IllegalStateException("start called in state " + mState);
@@ -164,8 +250,9 @@ public class MediaPlayer implements AudioRouting {
         }
     }
     private void resetPosition(int ms) { mPosBase = mTrack >= 0 ? husk.Audio.trackPosition(mTrack) : 0; mPosBaseMs = ms; }
-    public void pause() { synchronized (mLock) { if (mState == STARTED) { mState = PAUSED; if (mTrack >= 0) husk.Audio.trackPlay(mTrack, false); } } }
+    public void pause() { if (mAv != null) { if (mState == STARTED) { mAv.pause(); mState = PAUSED; } return; } synchronized (mLock) { if (mState == STARTED) { mState = PAUSED; if (mTrack >= 0) husk.Audio.trackPlay(mTrack, false); } } }
     public void stop() {
+        if (mAv != null) { if (mState != IDLE && mState != END && mState != ERROR) { mAv.pause(); mAv.seek(0); mState = STOPPED; } return; }
         synchronized (mLock) {
             if (mState == IDLE || mState == END || mState == ERROR) return;
             mStopThread = true; mLock.notifyAll();
@@ -176,6 +263,9 @@ public class MediaPlayer implements AudioRouting {
         }
     }
     public void reset() {
+        husk.AvVideo av; synchronized (mLock) { av = mAv; mAv = null; }
+        if (av != null) { av.release(); mState = IDLE; }
+        mAvUrl = null; mPath = null; mAvHeaders = null; mFdObj = null; mVideoW = mVideoH = 0;
         stop();
         synchronized (mLock) { if (mTrack >= 0) { husk.Audio.trackClose(mTrack); mTrack = -1; } mBytes = null; mFd = -1; mState = IDLE; mSeekTo = -1; }
     }
@@ -184,9 +274,10 @@ public class MediaPlayer implements AudioRouting {
     public boolean isLooping() { return mLooping; }
     public void setLooping(boolean l) { mLooping = l; }
     public void setNextMediaPlayer(MediaPlayer next) { mNext = next; }
-    public void setVolume(float l, float r) { mL = Math.max(0, Math.min(1, l)); mR = Math.max(0, Math.min(1, r)); if (mTrack >= 0) husk.Audio.trackVolume(mTrack, mL, mR); }
+    public void setVolume(float l, float r) { mL = Math.max(0, Math.min(1, l)); mR = Math.max(0, Math.min(1, r)); if (mAv != null) mAv.volume((mL + mR) / 2); if (mTrack >= 0) husk.Audio.trackVolume(mTrack, mL, mR); }
     public void setVolume(float v) { setVolume(v, v); }
     public void seekTo(int ms) {
+        if (mAv != null) { mAv.seek(Math.max(0, ms)); if (mState == COMPLETED) mState = PAUSED; mMain.post(() -> { if (mOnSeek != null) mOnSeek.onSeekComplete(this); }); return; }
         synchronized (mLock) {
             if (mDec == 0) return;
             ms = Math.max(0, mDuration > 0 ? Math.min(ms, mDuration) : ms);
@@ -197,6 +288,7 @@ public class MediaPlayer implements AudioRouting {
     }
     public void seekTo(long ms, int mode) { seekTo((int) ms); }
     public int getCurrentPosition() {
+        if (mAv != null) return (int) mAv.position();
         synchronized (mLock) {
             if (mSeekTo >= 0) return mSeekTo;
             if (mState == COMPLETED) return mDuration;
@@ -205,12 +297,12 @@ public class MediaPlayer implements AudioRouting {
             return (int) Math.min(mDuration > 0 ? mDuration : Integer.MAX_VALUE, mPosBaseMs + frames * 1000L / mRate);
         }
     }
-    public int getDuration() { return mState == IDLE || mState == INITIALIZED || mState == ERROR ? -1 : mDuration; }
-    public int getVideoWidth() { return 0; }
-    public int getVideoHeight() { return 0; }
-    public void setDisplay(android.view.SurfaceHolder h) {}
-    public void setSurface(android.view.Surface s) {}
-    public void setVideoScalingMode(int m) {}
+    public int getDuration() { if (mAv != null) { long d = mAv.duration(); return d < 0 ? -1 : (int) d; } return mState == IDLE || mState == INITIALIZED || mState == ERROR ? -1 : mDuration; }
+    public int getVideoWidth() { return mVideoW; }
+    public int getVideoHeight() { return mVideoH; }
+    public void setDisplay(android.view.SurfaceHolder h) { mHolder = h; mSurface = null; if (mAv != null && h != null) mAv.setDisplay(h); }
+    public void setSurface(android.view.Surface s) { mSurface = s; mHolder = null; if (mAv != null && s != null) mAv.setSurface(s); }
+    public void setVideoScalingMode(int m) { mScaling = m; if (mAv != null) mAv.setScaleToFill(m == VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING); }
     public void setScreenOnWhilePlaying(boolean b) {}
     public void setWakeMode(Context c, int mode) {}
     @Deprecated public void setAudioStreamType(int t) {}
@@ -230,8 +322,8 @@ public class MediaPlayer implements AudioRouting {
     public void setOnErrorListener(OnErrorListener l) { mOnError = l; }
     public void setOnSeekCompleteListener(OnSeekCompleteListener l) { mOnSeek = l; }
     public void setOnInfoListener(OnInfoListener l) { mOnInfo = l; }
-    public void setOnBufferingUpdateListener(OnBufferingUpdateListener l) {}
-    public void setOnVideoSizeChangedListener(OnVideoSizeChangedListener l) {}
+    public void setOnBufferingUpdateListener(OnBufferingUpdateListener l) { mOnBuffer = l; }
+    public void setOnVideoSizeChangedListener(OnVideoSizeChangedListener l) { mOnSize = l; }
     public void setOnTimedTextListener(OnTimedTextListener l) {}
     public AudioDeviceInfo getRoutedDevice() { return AudioDeviceInfo.huskSpeaker(); }
     public boolean setPreferredDevice(AudioDeviceInfo d) { return true; }

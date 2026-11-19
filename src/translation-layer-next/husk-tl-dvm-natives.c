@@ -772,7 +772,10 @@ NAT(Thread_nativeCreate)
     /* 32 MiB of stack for deep interpreted calls, but that is address space, and an install without extended virtual addressing has
        only a few GiB (Flutter's heap reservation and TikTok's many threads used it up: OutOfMemoryError: pthread_create). When it is
        refused, a smaller stack, and the same for the threads after it; dvm_call's overflow check goes by the thread's real stack. */
-    static _Atomic size_t stack = 32u << 20;
+    static _Atomic size_t stack = 0;
+    /* Short of address space (no extended-virtual-addressing, as on a free Apple ID): start at 4 MiB rather than wait for a
+       refusal, by which time the threads made with 32 MiB have used a gigabyte of it and the next allocation anywhere fails. */
+    if (!atomic_load(&stack)) { bool tl_mm_address_space_short(void); atomic_store(&stack, tl_mm_address_space_short() ? (4u << 20) : (32u << 20)); }
     int rc;
     for (;;) {
         size_t sz = atomic_load(&stack);
@@ -2194,8 +2197,10 @@ NAT(System_load)
     return !tl_jni_pending();
 }
 
+dvm_native_fn tl_avplayer_hook(const char *cls, const char *name, const char *sig);
 dvm_native_fn dvm_fast_path(const char *cls, const char *name, const char *sig)
 {
+    { dvm_native_fn f = tl_avplayer_hook(cls, name, sig); if (f) return f; }   /* an app's ExoPlayer, played by AVPlayer */
     if (!strcmp(cls, "java/lang/Object") && !strcmp(name, "getClass") && !strcmp(sig, "()Ljava/lang/Class;")) return Object_getClass;
     if (!strcmp(cls, "java/lang/System") && !strcmp(name, "loadLibrary") && !strcmp(sig, "(Ljava/lang/String;)V")) return System_loadLibrary;
     if (!strcmp(cls, "java/lang/System") && !strcmp(name, "load") && !strcmp(sig, "(Ljava/lang/String;)V")) return System_load;

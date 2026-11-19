@@ -207,8 +207,10 @@ static uint16_t *mutf8_to_u16(const char *s, int32_t *n)
     return o;
 }
 
-/* UTF-16 to UTF-8 (surrogate pairs joined; U+0000 as C0 80). */
-static char *u16_to_utf8(const uint16_t *s, int32_t n)
+/* UTF-16 to UTF-8 (surrogate pairs joined; U+0000 as C0 80). Also tl_jni_string's, which makes a string's UTF-8 form on demand. */
+char *tl_u16_to_utf8(const uint16_t *s, int32_t n);
+#define u16_to_utf8 tl_u16_to_utf8
+char *tl_u16_to_utf8(const uint16_t *s, int32_t n)
 {
     char *o = malloc((size_t)n * 3 + 1);
     size_t k = 0;
@@ -267,8 +269,10 @@ static tl_jclass *g_string_class;
 jobj *tl_dvm_string_u16(const uint16_t *s, int32_t n)
 {
     jobj *o = tl_jni_new_string("");
+    /* Only the UTF-16 form: nothing frees Java strings, and most never reach native code, so the UTF-8 copy (up to 3 bytes a
+     * character) is made by tl_jni_string when something asks for it. */
     free(o->str.utf8);
-    o->str.utf8 = u16_to_utf8(s, n);
+    o->str.utf8 = NULL;
     o->str.u16 = malloc((size_t)(n ? n : 1) * 2);
     if (n) memcpy(o->str.u16, s, (size_t)n * 2);
     o->str.len16 = n;

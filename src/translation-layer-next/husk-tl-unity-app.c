@@ -342,6 +342,7 @@ static void *launch_thread(void *arg)
         ok = tl_gm_start(&cfg) && tl_gm_run();
     } else if (A.engine == ENGINE_JAVA) {
         tl_log_line("java: starting %s as %s, %dx%d (runtime %s)", A.apk, A.package, A.width, A.height, g_java_root);
+        { bool tl_mm_address_space_short(void); (void)tl_mm_address_space_short(); }   /* logs whether this install has the address space of the extended-virtual-addressing entitlement */
         ok = false;
         if (g_java_root[0]) {
             pthread_attr_t at; pthread_attr_init(&at); pthread_attr_setstacksize(&at, 64u << 20);

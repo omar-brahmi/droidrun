@@ -6,12 +6,17 @@ import android.net.Uri;
 import android.util.AttributeSet;
 import android.view.SurfaceView;
 
-/** A video surface: its source is recorded and its listeners are told it cannot play (video playback is not available yet). */
+/** A video, played by MediaPlayer (and so by iOS's AVPlayer) into this SurfaceView, as Android's VideoView does. */
 public class VideoView extends SurfaceView implements MediaController.MediaPlayerControl {
     private Uri mUri;
+    private java.util.Map<String, String> mHeaders;
+    private MediaPlayer mPlayer;
+    private boolean mPrepared, mStartWhenPrepared;
+    private int mSeekWhenPrepared;
     private MediaPlayer.OnErrorListener mOnError;
     private MediaPlayer.OnPreparedListener mOnPrepared;
     private MediaPlayer.OnCompletionListener mOnCompletion;
+    private MediaPlayer.OnInfoListener mOnInfo;
     public VideoView(Context c) { super(c); }
     public VideoView(Context c, AttributeSet a) { super(c, a); }
     public VideoView(Context c, AttributeSet a, int s) { super(c, a, s); }
@@ -19,23 +24,52 @@ public class VideoView extends SurfaceView implements MediaController.MediaPlaye
     public void setVideoPath(String p) { setVideoURI(Uri.parse(p)); }
     public void setVideoURI(Uri u) { setVideoURI(u, null); }
     public void setVideoURI(Uri u, java.util.Map<String, String> headers) {
-        mUri = u;
-        android.util.Log.w("VideoView", "video playback is not available: " + u);
-        post(() -> { if (mOnError != null) mOnError.onError(null, MediaPlayer.MEDIA_ERROR_UNKNOWN, 0); });
+        mUri = u; mHeaders = headers; mSeekWhenPrepared = 0;
+        open();
     }
+    private void open() {
+        release();
+        if (mUri == null) return;
+        MediaPlayer mp = new MediaPlayer();
+        mPlayer = mp; mPrepared = false;
+        mp.setOnPreparedListener(p -> {
+            if (p != mPlayer) return;
+            mPrepared = true;
+            if (mOnPrepared != null) mOnPrepared.onPrepared(p);
+            if (mSeekWhenPrepared > 0) p.seekTo(mSeekWhenPrepared);
+            if (mStartWhenPrepared) p.start();
+        });
+        mp.setOnCompletionListener(p -> { if (mOnCompletion != null) mOnCompletion.onCompletion(p); });
+        mp.setOnErrorListener((p, what, extra) -> mOnError != null && mOnError.onError(p, what, extra));
+        mp.setOnInfoListener((p, what, extra) -> mOnInfo != null && mOnInfo.onInfo(p, what, extra));
+        try {
+            mp.setDisplay(getHolder());
+            mp.setDataSource(getContext(), mUri, mHeaders);
+            mp.prepareAsync();
+        } catch (Exception e) {
+            android.util.Log.w("VideoView", "cannot open " + mUri + ": " + e);
+            post(() -> { if (mOnError != null) mOnError.onError(mp, MediaPlayer.MEDIA_ERROR_UNKNOWN, 0); });
+        }
+    }
+    private void release() { MediaPlayer p = mPlayer; mPlayer = null; mPrepared = false; if (p != null) p.release(); }
     public void setMediaController(MediaController c) {}
     public void setOnPreparedListener(MediaPlayer.OnPreparedListener l) { mOnPrepared = l; }
     public void setOnCompletionListener(MediaPlayer.OnCompletionListener l) { mOnCompletion = l; }
     public void setOnErrorListener(MediaPlayer.OnErrorListener l) { mOnError = l; }
-    public void setOnInfoListener(MediaPlayer.OnInfoListener l) {}
+    public void setOnInfoListener(MediaPlayer.OnInfoListener l) { mOnInfo = l; }
     public void setAudioFocusRequest(int f) {}
-    public void stopPlayback() {}
-    public void suspend() {} public void resume() {}
-    public void start() {} public void pause() {}
-    public int getDuration() { return -1; } public int getCurrentPosition() { return 0; } public void seekTo(int ms) {}
-    public boolean isPlaying() { return false; } public int getBufferPercentage() { return 0; }
+    public void stopPlayback() { mStartWhenPrepared = false; release(); }
+    public void suspend() { release(); }
+    public void resume() { open(); }
+    public void start() { if (mPlayer != null && mPrepared) mPlayer.start(); mStartWhenPrepared = true; }
+    public void pause() { if (mPlayer != null && mPrepared && mPlayer.isPlaying()) mPlayer.pause(); mStartWhenPrepared = false; }
+    public int getDuration() { return mPlayer != null && mPrepared ? mPlayer.getDuration() : -1; }
+    public int getCurrentPosition() { return mPlayer != null && mPrepared ? mPlayer.getCurrentPosition() : 0; }
+    public void seekTo(int ms) { if (mPlayer != null && mPrepared) mPlayer.seekTo(ms); else mSeekWhenPrepared = ms; }
+    public boolean isPlaying() { return mPlayer != null && mPrepared && mPlayer.isPlaying(); }
+    public int getBufferPercentage() { return 0; }
     public boolean canPause() { return true; } public boolean canSeekBackward() { return true; } public boolean canSeekForward() { return true; }
-    public int getAudioSessionId() { return 0; }
+    public int getAudioSessionId() { return mPlayer != null ? mPlayer.getAudioSessionId() : 0; }
     public int resolveAdjustedSize(int desired, int spec) { return getDefaultSize(desired, spec); }
     // ---- generated by tools/compat/fillmembers.py: the platform's members this class does not write (signatures only)
     public void addSubtitleSource(java.io.InputStream p0, android.media.MediaFormat p1) {}

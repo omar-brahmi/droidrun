@@ -81,7 +81,7 @@ struct TLAppSettings: Codable, Equatable {
     var window: WindowMode = .auto
     var resolution: Resolution = .high
     /// The frames-per-second readout in the top bar.
-    var showStats = true
+    var showStats = false
     /// Start with nothing over the picture: no bar, no controller, no readout. Three fingers tapped together bring them back.
     var cleanView = false
     /// Stop the screen from dimming and locking while the game is on.
@@ -101,7 +101,7 @@ struct TLAppSettings: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         orientation = try c.decodeIfPresent(Orientation.self, forKey: .orientation) ?? .auto
         resolution = try c.decodeIfPresent(Resolution.self, forKey: .resolution) ?? .high
-        showStats = try c.decodeIfPresent(Bool.self, forKey: .showStats) ?? true
+        showStats = try c.decodeIfPresent(Bool.self, forKey: .showStats) ?? false
         cleanView = try c.decodeIfPresent(Bool.self, forKey: .cleanView) ?? false
         keepAwake = try c.decodeIfPresent(Bool.self, forKey: .keepAwake) ?? true
         pad = try c.decodeIfPresent(PadMode.self, forKey: .pad) ?? .auto

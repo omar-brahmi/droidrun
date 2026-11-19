@@ -93,6 +93,15 @@ public class Typeface {
         private byte[] data; private int weight = -1; private boolean italic; private String fallback;
         public Builder(java.io.File f) { try { data = java.nio.file.Files.readAllBytes(f.toPath()); } catch (java.io.IOException e) {} }
         public Builder(android.content.res.AssetManager m, String path) { data = husk.Native.readAsset(path); }
+        /** The font is read from the descriptor's start, whatever its position, and the descriptor stays open: it is the caller's. */
+        public Builder(java.io.FileDescriptor fd) {
+            try {
+                java.nio.channels.FileChannel ch = new java.io.FileInputStream(fd).getChannel();
+                java.nio.ByteBuffer b = java.nio.ByteBuffer.allocate((int) ch.size());
+                long at = 0; while (b.hasRemaining()) { int n = ch.read(b, at); if (n <= 0) break; at += n; }
+                if (!b.hasRemaining()) data = b.array();
+            } catch (java.io.IOException | RuntimeException e) {}
+        }
         public Builder setWeight(int w) { weight = w; return this; }
         public Builder setItalic(boolean i) { italic = i; return this; }
         public Builder setFallback(String f) { fallback = f; return this; }

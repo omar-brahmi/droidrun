@@ -19,8 +19,9 @@ struct ProfileView: View {
             .background(Console.page.ignoresSafeArea())
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-                if account.signedIn {
-                    ToolbarItem(placement: .primaryAction) {
+                // The condition sits inside the item: an `if` in a toolbar builder needs iOS 16 with the iOS 26 SDK.
+                ToolbarItem(placement: .primaryAction) {
+                    if account.signedIn {
                         Menu {
                             Button { editing = true } label: { Label("Edit Profile", systemImage: "pencil") }
                             if let u = account.user {

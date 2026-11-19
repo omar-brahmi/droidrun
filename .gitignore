@@ -26,3 +26,6 @@ third_party/gpu/
 # local notes and editor rules, never part of the repo
 /Husk_*.MD
 /.cursor/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

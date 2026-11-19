@@ -344,6 +344,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback {
     // ---- hierarchy
     /* the window is the parent only of its own root view (a removed view that still remembers the window has none) */
     public final ViewParent getParent() { return mParent != null ? mParent : mRoot != null && mRoot.getView() == this ? mRoot : null; }
+    public ViewParent getParentForAccessibility() { return getParent(); }
     public View getRootView() { View v = this; while (v.mParent != null) v = v.mParent; return v; }
     public boolean isAttachedToWindow() { return mRoot != null; }
     public boolean isLaidOut() { return mRoot != null && (mPrivateFlags & PFLAG_FORCE_LAYOUT) == 0; }
