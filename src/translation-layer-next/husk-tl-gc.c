@@ -272,7 +272,7 @@ static void trace(void)
 typedef struct { uintptr_t lo, hi; } run;
 static struct {
     run *runs; size_t nruns, caprun;
-    _Atomic size_t next;
+    size_t next;                                    /* the next run to take, by __atomic_fetch_add */
     bool overflow;                                  /* more runs than room: the collecting thread scans the rest alone */
 } R;
 
