@@ -18,7 +18,7 @@ import struct
 import sys
 import zipfile
 
-DVMC_VERSION = 1
+DVMC_VERSION = 2
 
 # ---------------------------------------------------------------- DEX reading
 
@@ -489,9 +489,18 @@ class Gen:
             swap = kind == 2 and cls == 'Ljava/lang/String;' and name == '<init>'
             ws = ', '.join(v(r) for r in regs)
             arr = f'uint64_t w[] = {{ {ws} }}; ' if regs else ''
-            e(f'{{ {arr}jobj *so = NULL, *sn = NULL; (void)so; (void)sn;')
-            e(f'  if (!A->invoke(m, {pc}u, {kind}, {u[1]}u, {"w" if regs else "NULL"}, {len(regs)}, &res, &so, &sn)) {F}')
-            if swap:
+            wp, n = ('w' if regs else 'NULL'), len(regs)
+            e(f'{{ {arr}jobj *so = NULL, *sn = NULL; (void)so; (void)sn; static dvmc_site cs;')
+            if not swap:
+                # the site's resolved target: called directly while the app is the same (and, virtual, the receiver's class is)
+                hit = 't && t->gen == *A->gen'
+                if kind in (0, 4):
+                    hit += f' && RL(w[0]) && RL(w[0])->kind != TL_K_CLASS && (const void *)RL(w[0])->cls == t->rcls'
+                e(f'  const dvmc_target *t = __atomic_load_n(&cs.t, __ATOMIC_ACQUIRE);')
+                e(f'  if ({hit}) {{ if (!A->call_words(t->m, {pc}u, {wp}, {n}, &res)) {F} }}')
+                e(f'  else if (!A->invoke(m, {pc}u, {kind}, {u[1]}u, {wp}, {n}, &res, &so, &sn, &cs)) {F}')
+            else:
+                e(f'  if (!A->invoke(m, {pc}u, {kind}, {u[1]}u, {wp}, {n}, &res, &so, &sn, NULL)) {F}')
                 e('  if (so) { ' + ' '.join(f'if (v{i} == WL(so)) v{i} = WL(sn);' for i in range(self.m.regs)) + ' }')
             e('}')
             return

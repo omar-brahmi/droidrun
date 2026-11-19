@@ -102,9 +102,21 @@ jobs:
       - name: Compile Dalvik methods (dexc)
         if: inputs.dexc != ''
         run: |
-          python3 tools/dexc/dexc.py "packager/input/${{ inputs.apk }}" dexc-gen ${{ inputs.dexc }}
+          mkdir -p out
+          opts="${{ inputs.dexc }}"
+          inputs="packager/input/${{ inputs.apk }}"
+          # --profile-run: run the app interpreted first, counting calls (TL_DVM_PROFILE), and compile what it found hot --
+          # in the app and in the boot class path (libcore, the framework), whose code every app runs
+          if [[ " $opts " == *" --profile-run "* ]]; then
+            opts="${opts/--profile-run/} --profile out/profile.txt"
+            TL_DEXC=0 TL_DVM_PROFILE="$GITHUB_WORKSPACE/out/profile.txt" TL_CTL=/dev/null \
+              ./javaapp-test "packager/input/${{ inputs.apk }}" ${{ inputs.seconds }} 856 1852 > out/profile-run.log 2>&1 || true
+            echo "hot methods: $(wc -l < out/profile.txt)"; sort -k3 -n -r out/profile.txt | head -20
+            inputs="$inputs $TL_FRAMEWORK $TL_FRAMEWORK_CORE $(ls "$TL_ART"/javalib/*.jar 2>/dev/null)"
+          fi
+          for f in $inputs; do python3 tools/dexc/dexc.py "$f" dexc-gen $opts; done
           bash tools/dexc/build.sh dexc-gen dexc-out macos
-          mkdir -p out && cp -R dexc-gen out/dexc-gen
+          cp -R dexc-gen out/dexc-gen
 
       - name: Run
         run: |

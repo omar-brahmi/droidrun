@@ -21,7 +21,7 @@
 
 #include "husk-tl-jni.h"
 
-#define DVMC_VERSION 1
+#define DVMC_VERSION 2
 
 struct dvm_method;
 
@@ -40,6 +40,16 @@ typedef struct dvmc_field {
 
 enum { DVMC_F_HELPER = 0, DVMC_F_SLOT = 1, DVMC_F_STATIC = 2 };
 
+/* What a call site resolved to, for api->call_words next time: never changed once made (a site that sees another receiver class
+ * keeps its first one and takes the slow path for the others), replaced only when *api->gen moves on. */
+typedef struct dvmc_target {
+    uint32_t gen;
+    const void *rcls;                   /* virtual and interface calls: the receiver's class (jobj.cls) it holds for; else NULL */
+    struct dvm_method *m;
+} dvmc_target;
+
+typedef struct dvmc_site { const dvmc_target *t; } dvmc_site;
+
 typedef struct dvmc_api {
     uint32_t version;
     const volatile uint32_t *gen;       /* changes when the app's classes are dropped: field caches filled before are stale */
@@ -47,7 +57,9 @@ typedef struct dvmc_api {
      * two words (the second ignored), as the bytecode lists them. *swap_old/new: a String constructor replaced the
      * placeholder object (every register holding old must then hold new). */
     bool (*invoke)(struct dvm_method *caller, uint32_t pc, int kind, uint32_t midx, const uint64_t *w, int n, jvalue *result,
-                   jobj **swap_old, jobj **swap_new);
+                   jobj **swap_old, jobj **swap_new, dvmc_site *site);
+    /* a call through a site's dvmc_target: the arguments go into the callee's frame as they are (the result normalized) */
+    bool (*call_words)(struct dvm_method *target, uint32_t pc, const uint64_t *w, int n, jvalue *result);
     /* a field access the inline paths do not cover; fills *c when the site can use them next time */
     bool (*field)(struct dvm_method *m, uint32_t idx, bool is_static, bool put, jobj *o, uint64_t *reg, dvmc_field *c);
     jobj *(*const_string)(struct dvm_method *m, uint32_t idx);

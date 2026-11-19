@@ -992,7 +992,9 @@ static bool watch_hit(const char *w, const dvm_method *m)
     return false;
 }
 
-bool dvm_call(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
+/* A call's frame on this thread's Java stack (t_frames, for stack traces): false when it would overflow, with StackOverflowError
+ * thrown and nothing pushed. frame_leave pops it. */
+static bool frame_enter(dvm_method *m)
 {
     if (t_depth < 8192) { t_frames[t_depth] = m; t_pcs[t_depth] = 0; }
     t_depth++;
@@ -1002,21 +1004,29 @@ bool dvm_call(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
     /* ...or when the thread's own stack is nearly used up (a native thread made with a small one calling into Java): each
        interpreted call takes several KB of it, where ART's take a few hundred bytes */
     static _Thread_local uintptr_t t_stack_low;
-    if (!t_stack_low) {
+    if (__builtin_expect(!t_stack_low, 0)) {
         pthread_t me = pthread_self();
         uintptr_t top = (uintptr_t)pthread_get_stackaddr_np(me); size_t sz = pthread_get_stacksize_np(me);
         t_stack_low = top - sz + (sz > (2u << 20) ? (512u << 10) : sz / 4);   /* what is kept back for C below the interpreter */
     }
     uintptr_t sp = (uintptr_t)__builtin_frame_address(0);
     /* the error is thrown with 128 KB still above that, which its own calls may use */
-    if (t_depth > (t_overflowing ? 8200 : 8000) || sp < t_stack_low + (t_overflowing ? 0 : (128u << 10))) {
+    if (__builtin_expect(t_depth > (t_overflowing ? 8200 : 8000) || sp < t_stack_low + (t_overflowing ? 0 : (128u << 10)), 0)) {
         t_depth--;
         if (t_overflowing) return false;
         t_overflowing = true;
-        bool r = dvm_throw("java/lang/StackOverflowError", "stack size 8000 frames");
+        dvm_throw("java/lang/StackOverflowError", "stack size 8000 frames");
         t_overflowing = false;
-        return r;
+        return false;
     }
+    return true;
+}
+
+static inline void frame_leave(void) { t_depth--; }
+
+bool dvm_call(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
+{
+    if (!frame_enter(m)) return false;
     static const char *watch;
     if (!watch) watch = getenv("TL_DVM_CALLS") ? getenv("TL_DVM_CALLS") : "";
     if (watch[0] && watch_hit(watch, m)) {
@@ -1041,7 +1051,40 @@ bool dvm_call(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
         }
     }
     bool ok = dvm_call_inner(m, self, params, ret);
-    t_depth--;
+    frame_leave();
+    return ok;
+}
+
+/* A call whose arguments are already register values (w[0..n): this first, wide values as two words), as a call site that
+ * resolved its target before passes them: they go into the callee's frame as they are, with no conversion. A target that is
+ * not bytecode (native, intrinsic, proxy) takes the ordinary path. */
+static void normalize(char k, jvalue *v);
+static bool call_words(dvm_method *m, uint32_t caller_pc, const uint64_t *w, int n, jvalue *ret)
+{
+    if (t_depth > 0 && t_depth <= 8192) t_pcs[t_depth - 1] = caller_pc;
+    if (__builtin_expect(!m->insns || m->proxy_method || m->intrinsic || n != m->ins || m->regs > 64, 0)) {
+        jvalue params[256]; jobj *self = NULL; int ai = 0;
+        if (!(m->flags & 8)) self = (jobj *)(uintptr_t)w[ai++];
+        for (int i = 0; i < m->nparams && i < 256; i++) {
+            char k = m->shorty[1 + i];
+            params[i].j = 0;
+            if (k == 'J' || k == 'D') { params[i].j = (int64_t)w[ai]; ai += 2; }
+            else if (k == 'L') params[i].l = (jobj *)(uintptr_t)w[ai++];
+            else params[i].j = (int64_t)(uint32_t)w[ai++];
+        }
+        bool ok = dvm_call(m, self, params, ret);
+        if (ok) normalize(m->shorty[0], ret);
+        return ok;
+    }
+    if (!frame_enter(m)) return false;
+    ret->j = 0;
+    if (__builtin_expect(g_dvm_profile, 0) && !m->compiled) dvmc_count_call(m);
+    uint64_t regs[64];
+    int first = m->regs - m->ins;
+    memset(regs, 0, sizeof(uint64_t) * first);
+    memcpy(regs + first, w, sizeof(uint64_t) * n);
+    bool ok = m->compiled ? m->compiled(m, regs, ret) : interpret(m, regs, ret);
+    frame_leave();
     return ok;
 }
 
@@ -1410,8 +1453,10 @@ bool dvm_string_init(const char *sig, const jvalue *params, jvalue *ret);
 /* An invoke with its argument registers' values in w[0..count) (a wide value as two words, the second unused), as the bytecode lists
  * them: what the interpreter and compiled methods (husk-tl-dvmc.h) both call. When a String constructor replaces the placeholder
  * the new-instance made, *swap_old and *swap_new say so: the caller puts the new object in every register that held the old. */
+static uint32_t g_dvmc_gen = 1;     /* moves on when the app's classes are dropped: compiled sites' caches are stale then */
+
 static bool invoke_words(dvm_method *caller, int kind, uint32_t midx, const uint64_t *w, int count, jvalue *result,
-                         jobj **swap_old, jobj **swap_new)
+                         jobj **swap_old, jobj **swap_new, dvmc_site *site)
 {
     dvm_dex *d = caller->cls->dex;
     bool is_static = kind == 3;
@@ -1522,6 +1567,16 @@ static bool invoke_words(dvm_method *caller, int kind, uint32_t midx, const uint
               tl_jni_clear(); if (saved) tl_jni_set_pending(saved);
           }
       } }
+    /* a compiled call site: what it resolved to, so next time it calls the target directly. A static method's class has to be
+     * initialized for good first (until then each call goes through dvm_ensure_init); a virtual call holds for this receiver
+     * class only. A site keeps its first target: one another thread is filling stays as that thread made it. */
+    const dvmc_target *had = site ? __atomic_load_n(&site->t, __ATOMIC_ACQUIRE) : NULL;
+    if (site && (!had || had->gen != g_dvmc_gen) && (kind != 3 || target->cls->state == CS_INITIALIZED) && (!self || self->kind != TL_K_CLASS)) {
+        dvmc_target *t = malloc(sizeof(*t));
+        t->gen = g_dvmc_gen; t->m = target; t->rcls = (kind == 0 || kind == 4) ? (const void *)self->cls : NULL;
+        /* a stale one (an app dropped since) stays allocated: another thread may be reading it */
+        if (!__atomic_compare_exchange_n(&site->t, &had, t, false, __ATOMIC_RELEASE, __ATOMIC_RELAXED)) free(t);
+    }
     return dvm_call(target, self, params, result);
 }
 
@@ -1531,7 +1586,7 @@ static bool invoke_regs(dvm_method *caller, int kind, uint32_t midx, int count, 
     uint64_t w[256];
     for (int i = 0; i < count && i < 256; i++) w[i] = regs[range ? (uint16_t)(first + i) : argregs[i]];
     jobj *old = NULL, *new = NULL;
-    if (!invoke_words(caller, kind, midx, w, count, result, &old, &new)) return false;
+    if (!invoke_words(caller, kind, midx, w, count, result, &old, &new, NULL)) return false;
     if (old) for (int i = 0; i < caller->regs; i++) if (regs[i] == (uint64_t)(uintptr_t)old) regs[i] = (uint64_t)(uintptr_t)new;
     return true;
 }
@@ -2069,14 +2124,12 @@ done:
 
 /* Each does what the interpreter's instruction of the same name does, with its messages. */
 
-static uint32_t g_dvmc_gen = 1;
-
 static bool c_invoke(dvm_method *caller, uint32_t pc, int kind, uint32_t midx, const uint64_t *w, int n, jvalue *result,
-                     jobj **swap_old, jobj **swap_new)
+                     jobj **swap_old, jobj **swap_new, dvmc_site *site)
 {
     if (t_depth > 0 && t_depth <= 8192) t_pcs[t_depth - 1] = pc;
     result->j = 0;
-    if (!invoke_words(caller, kind, midx, w, n, result, swap_old, swap_new)) return false;
+    if (!invoke_words(caller, kind, midx, w, n, result, swap_old, swap_new, site)) return false;
     normalize(((mref *)caller->cls->dex->mcache[midx])->shorty[0], result);
     return true;
 }
@@ -2258,7 +2311,7 @@ static const dvmc_api g_dvmc_api = {
     .filled_new_array = c_filled_new_array, .fill_array_data = c_fill_array_data, .aput_object = c_aput_object,
     .monitor_enter = c_monitor_enter, .monitor_exit = c_monitor_exit, .throw_obj = c_throw_obj, .throw_npe = c_throw_npe,
     .throw_index = c_throw_index, .throw_div_zero = c_throw_div_zero, .throw_neg_size = c_throw_neg_size,
-    .handler = c_handler, .sync_enter = c_sync_enter,
+    .handler = c_handler, .sync_enter = c_sync_enter, .call_words = call_words,
 };
 
 const dvmc_api *dvm_compiled_api(void) { return &g_dvmc_api; }
