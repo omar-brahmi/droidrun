@@ -965,9 +965,12 @@ static void *gl_main(void *arg)
             surf_w = cw; surf_h = ch;
             EGLint qw = 0, qh = 0;
             if (querySurface) { querySurface(dpy, surf, 0x3057, &qw); querySurface(dpy, surf, 0x3056, &qh); }
-            if (destroySurface && (qw != cw || qh != ch)) {
+            if (destroySurface && (qw != cw || qh != ch) && !TARGET_OS_IPHONE) {
                 makeCurrent(dpy, NULL, NULL, NULL);
+                /* the screen's own surface, not an app's to composite under the views (which a second window surface is) */
+                pthread_mutex_lock(&E2.lk); E2.ready = false; pthread_mutex_unlock(&E2.lk);
                 EGLSurface ns = createWindowSurface(dpy, cfg, tl_nwindow_get(), NULL);
+                pthread_mutex_lock(&E2.lk); E2.ready = true; pthread_mutex_unlock(&E2.lk);
                 if (ns) { destroySurface(dpy, surf); surf = ns; }
                 tl_log_line("javaapp: screen surface %s at %dx%d (was %dx%d)", ns ? "made again" : "could not be made again", cw, ch, qw, qh);
             }
