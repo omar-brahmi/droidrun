@@ -446,6 +446,7 @@ public final class AvPlayer implements InvocationHandler {
             int w = vs >>> 16, ht = vs & 0xffff;
             Surface s = target();
             SurfaceView sv = s != null ? s.huskView : null;
+            if (s != lastTarget) { lastTarget = s; describeTarget(s); }
             if (sv != shownOn) { if (shownOn != null) shownOn.huskClearVideo(); shownOn = null; }
             if (sv != layerOn && layerOn != null) { layerOn.huskSetVideoLayer(null); layerOn = null; }
             if (sv != null && LAYER) {
@@ -471,6 +472,24 @@ public final class AvPlayer implements InvocationHandler {
         }
         if (shownOn != null) shownOn.huskClearVideo();
         if (layerOn != null) layerOn.huskSetVideoLayer(null);
+    }
+
+    private Surface lastTarget;
+    /** Where the picture goes, and every transform on the way to the screen (for pictures shown turned or upside down). */
+    private static void describeTarget(Surface s) {
+        if (s == null) { android.util.Log.i(TAG, "video target: none"); return; }
+        android.view.View v = s.huskView != null ? s.huskView : s.huskTexture != null ? s.huskTexture.huskView : null;
+        StringBuilder b = new StringBuilder("video target: ").append(s.huskView != null ? "SurfaceView" : s.huskTexture != null ? "SurfaceTexture" : "surface");
+        for (int depth = 0; v != null && depth < 30; depth++) {
+            b.append(" < ").append(v.getClass().getSimpleName());
+            if (v.getRotation() != 0 || v.getScaleX() != 1 || v.getScaleY() != 1 || v.getRotationX() != 0 || v.getRotationY() != 0)
+                b.append("{rot ").append(v.getRotation()).append(" rx ").append(v.getRotationX()).append(" ry ").append(v.getRotationY())
+                 .append(" sx ").append(v.getScaleX()).append(" sy ").append(v.getScaleY()).append('}');
+            if (v instanceof android.view.TextureView) b.append("{transform ").append(((android.view.TextureView) v).getTransform(null)).append('}');
+            android.view.ViewParent p = v.getParent();
+            v = p instanceof android.view.View ? (android.view.View) p : null;
+        }
+        android.util.Log.i(TAG, b.toString());
     }
 
     private void draw(Surface s, Bitmap frame, Rect dst, Paint paint, int w, int ht) {

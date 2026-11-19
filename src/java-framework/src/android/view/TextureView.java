@@ -48,7 +48,11 @@ public class TextureView extends View {
     public boolean isAvailable() { return mTexture != null && mAvailable; }
     public boolean isOpaque() { return mOpaque; }
     public void setOpaque(boolean o) { mOpaque = o; invalidate(); }
-    public void setTransform(Matrix m) { mMatrix.set(m); invalidate(); }
+    public void setTransform(Matrix m) {
+        mMatrix.set(m);
+        if (m != null && !m.isIdentity()) android.util.Log.d("TextureView", "transform " + m);
+        invalidate();
+    }
     public Matrix getTransform(Matrix m) { if (m == null) m = new Matrix(); m.set(mMatrix); return m; }
     public void setLayerPaint(Paint p) { mLayerPaint = p; invalidate(); }
     public void setLayerType(int type, Paint p) { mLayerPaint = p; }
