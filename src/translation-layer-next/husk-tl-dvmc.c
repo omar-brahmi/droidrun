@@ -103,6 +103,9 @@ static pthread_mutex_t g_prof_lock = PTHREAD_MUTEX_INITIALIZER;
 static dvm_method **g_seen; static size_t g_nseen, g_capseen;
 static prev *g_prev; static size_t g_nprev, g_capprev;           /* open addressing by key, g_capprev a power of two */
 static char *g_prof_path;
+/* what is written: every method that ran (the default: all of them are compiled ahead of time, the hottest at -O2, the rest
+ * small), or only those called / looping at least this much (TL_DVM_PROFILE_MIN=calls[,loops]) */
+static uint32_t g_min_calls = 1, g_min_loops = 1;
 
 static size_t prev_slot(const char *key)
 {
@@ -151,11 +154,11 @@ static void prof_write_locked(bool fold)
             if (!p->label) { char l[1024]; snprintf(l, sizeof(l), "%s.%s%s", m->cls->name, m->name, m->sig); p->label = strdup(l); }
             m->calls = m->loops = 0;    /* counted from 0 again: a boot class path method stays, and registers again */
         }
-        if (f && (calls >= 50 || loops >= 1000))                       /* colder is not worth compiling */
+        if (f && (calls >= g_min_calls || loops >= g_min_loops))
             fprintf(f, "%s %u %u %s.%s%s\n", key, calls, loops, m->cls->name, m->name, m->sig);
     }
     for (size_t i = 0; f && i < g_capprev; i++)
-        if (g_prev[i].key[0] && !g_prev[i].used && (g_prev[i].calls >= 50 || g_prev[i].loops >= 1000))
+        if (g_prev[i].key[0] && !g_prev[i].used && (g_prev[i].calls >= g_min_calls || g_prev[i].loops >= g_min_loops))
             fprintf(f, "%s %u %u %s\n", g_prev[i].key, g_prev[i].calls, g_prev[i].loops, g_prev[i].label ? g_prev[i].label : "?");
     if (f) { fclose(f); rename(tmp, g_prof_path); }
     if (fold) g_nseen = 0;
@@ -185,6 +188,8 @@ static void prof_start(void)
     const char *path = getenv("TL_DVM_PROFILE");
     if (!path || !*path) return;
     g_prof_path = strdup(path);
+    const char *min = getenv("TL_DVM_PROFILE_MIN");
+    if (min && *min) { unsigned c = 1, l = 0; int n = sscanf(min, "%u,%u", &c, &l); g_min_calls = c ? c : 1; g_min_loops = n == 2 && l ? l : g_min_calls * 20; }
     FILE *f = fopen(g_prof_path, "r");
     if (f) {
         char line[2048], hex[24], label[1500]; unsigned idx, calls, loops;

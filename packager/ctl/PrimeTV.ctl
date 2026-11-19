@@ -1,0 +1,19 @@
+wait 50000
+tap 428 1738
+wait 8000
+tap 428 1738
+wait 8000
+tap 428 1738
+wait 10000
+tap 220 700
+wait 40000
+back
+wait 8000
+tap 489 1740
+wait 15000
+tap 220 700
+wait 40000
+back
+wait 8000
+swipe 428 1400 428 600 600
+wait 8000

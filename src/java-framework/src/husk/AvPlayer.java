@@ -169,9 +169,7 @@ public final class AvPlayer implements InvocationHandler {
             case "setVideoSurfaceView": setSurfaceView((SurfaceView) a[0]); return null;
             case "setVideoSurfaceHolder": setHolder((SurfaceHolder) a[0]); return null;
             case "setVideoSurface": setSurface((Surface) a[0]); return null;
-            case "setVideoTextureView":
-                if (a[0] != null) { android.graphics.SurfaceTexture st = ((android.view.TextureView) a[0]).getSurfaceTexture(); setSurface(st != null ? new Surface(st) : null); }
-                return null;
+            case "setVideoTextureView": setTextureView((android.view.TextureView) a[0]); return null;
             case "clearVideoSurface": case "clearVideoSurfaceView": case "clearVideoSurfaceHolder": case "clearVideoTextureView":
                 setSurface(null); return null;
             case "getVideoSize": return videoSize();
@@ -417,10 +415,19 @@ public final class AvPlayer implements InvocationHandler {
     /* ---------------------------------------------------------------- video into the app's surface */
 
     private void setSurfaceView(SurfaceView v) { setHolder(v != null ? v.getHolder() : null); }
-    private synchronized void setHolder(SurfaceHolder hd) { holder = hd; surface = null; }
-    private synchronized void setSurface(Surface s) { surface = s; holder = null; }
+    private synchronized void setHolder(SurfaceHolder hd) { holder = hd; surface = null; textureView = null; }
+    private synchronized void setSurface(Surface s) { surface = s; holder = null; textureView = null; }
+    /* a TextureView's texture comes once it is attached and laid out, and again after it was detached: taken when it is there */
+    private android.view.TextureView textureView;
+    private synchronized void setTextureView(android.view.TextureView v) { textureView = v; surface = null; holder = null; }
 
     private synchronized Surface target() {
+        if (textureView != null) {
+            android.graphics.SurfaceTexture st = textureView.getSurfaceTexture();
+            if (st == null) { surface = null; return null; }
+            if (surface == null || surface.huskTexture != st) surface = new Surface(st);
+            return surface;
+        }
         if (surface != null) return surface;
         return holder != null ? holder.getSurface() : null;
     }
@@ -435,7 +442,8 @@ public final class AvPlayer implements InvocationHandler {
         Bitmap frame = null;
         Bitmap[] pair = new Bitmap[2];          /* a SurfaceView's frames: one shown while the next is copied into the other */
         int which = 0;
-        SurfaceView shownOn = null, layerOn = null;
+        SurfaceView shownOn = null;
+        android.view.View layerOn = null;
         Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
         Rect dst = new Rect();
         long nextPoll = 0;
@@ -448,12 +456,13 @@ public final class AvPlayer implements InvocationHandler {
             SurfaceView sv = s != null ? s.huskView : null;
             if (s != lastTarget) { lastTarget = s; describeTarget(s); }
             if (sv != shownOn) { if (shownOn != null) shownOn.huskClearVideo(); shownOn = null; }
-            if (sv != layerOn && layerOn != null) { layerOn.huskSetVideoLayer(null); layerOn = null; }
-            if (sv != null && LAYER) {
-                /* iOS shows the picture itself, under the screen where the SurfaceView leaves a hole: nothing is copied */
+            android.view.View lv = LAYER ? layerView(s) : null;
+            if (lv != layerOn && layerOn != null) { setLayer(layerOn, null); layerOn = null; }
+            if (lv != null) {
+                /* iOS shows the picture itself, under the screen where the SurfaceView / TextureView leaves a hole: nothing is copied */
                 if (layerOn == null) {
-                    sv.huskSetVideoLayer((x0, y0, w0, h0, vis) -> { long cur = h; if (cur != 0) nLayer(cur, x0, y0, w0, h0, vis, false); });
-                    layerOn = sv;
+                    setLayer(lv, (x0, y0, w0, h0, vis) -> { long cur = h; if (cur != 0) nLayer(cur, x0, y0, w0, h0, vis, false); });
+                    layerOn = lv;
                 }
                 if (w > 0 && ht > 0) framed(w, ht);
                 try { Thread.sleep(30); } catch (InterruptedException e) { break; }
@@ -471,10 +480,21 @@ public final class AvPlayer implements InvocationHandler {
             try { Thread.sleep(8); } catch (InterruptedException e) { break; }
         }
         if (shownOn != null) shownOn.huskClearVideo();
-        if (layerOn != null) layerOn.huskSetVideoLayer(null);
+        if (layerOn != null) setLayer(layerOn, null);
     }
 
     private Surface lastTarget;
+    /** The view iOS's own video layer can stand in for: a SurfaceView, or a TextureView that shows its texture untransformed. */
+    static android.view.View layerView(Surface s) {
+        if (s == null) return null;
+        if (s.huskView != null) return s.huskView;
+        android.view.View v = s.huskTexture != null ? s.huskTexture.huskView : null;
+        return v instanceof android.view.TextureView && ((android.view.TextureView) v).huskLayerable() ? v : null;
+    }
+    static void setLayer(android.view.View v, SurfaceView.VideoLayer l) {
+        if (v instanceof SurfaceView) ((SurfaceView) v).huskSetVideoLayer(l);
+        else if (v instanceof android.view.TextureView) ((android.view.TextureView) v).huskSetVideoLayer(l);
+    }
     /** Where the picture goes, and every transform on the way to the screen (for pictures shown turned or upside down). */
     private static void describeTarget(Surface s) {
         if (s == null) { android.util.Log.i(TAG, "video target: none"); return; }

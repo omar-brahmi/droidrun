@@ -597,7 +597,15 @@ static void collect(void)
         }
     }
     size_t marked = M0.marked, roots_mb = M0.words * 8 >> 20;
-    if (ok) { uint64_t d = (uint64_t)marked * 2; if (d < g_every) d = g_every; if (d > 3000000) d = 3000000; __atomic_store_n(&g_due, d, __ATOMIC_RELAXED); }
+    /* the next collection after twice the live objects are made; three times when this pause was long (a big heap, slow to stop
+       and scan): fewer stops for some more memory, of which the phone has room (PrimeTV paused 400-800 ms every few seconds) */
+    if (ok) {
+        bool slow = t_mark - t_stop > 250;
+        uint64_t d = (uint64_t)marked * (slow ? 3 : 2), cap = slow ? 4500000 : 3000000;
+        if (d < g_every) d = g_every;
+        if (d > cap) d = cap;
+        __atomic_store_n(&g_due, d, __ATOMIC_RELAXED);
+    }
     /* (the tables stay for the next collection) */
     pthread_mutex_unlock(&g_reg);
     pthread_mutex_unlock(&g_run);

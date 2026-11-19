@@ -160,10 +160,12 @@ static bool open_path(const char *path)
         FILE *f = fopen(path, "rb");
         if (!f) return false;
         fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
-        uint8_t *b = malloc((size_t)n);
-        bool ok = fread(b, 1, (size_t)n, f) == (size_t)n;
+        uint8_t *b = tl_gc_alloc_data((size_t)n);
+        bool ok = b && fread(b, 1, (size_t)n, f) == (size_t)n;
         fclose(f);
-        return ok && dex_add(b, (size_t)n, path);
+        if (ok && dex_add(b, (size_t)n, path)) return true;
+        tl_gc_free_data(b, (size_t)n);
+        return false;
     }
     tl_zip z; char err[160];
     if (!tl_zip_open(&z, path, err, sizeof(err))) { tl_log_line("dvm: %s: %s", path, err); return false; }
@@ -180,7 +182,8 @@ static bool open_path(const char *path)
            copied, since dropping an app frees them. */
         const uint8_t *copy;
         if (!owned && g_nboot_dex < 0) { copy = data; mapped = true; }
-        else { uint8_t *c = malloc(len); memcpy(c, data, len); if (owned) free((void *)data); copy = c; }
+        /* the app's copy in memory the collector never scans (a DEX holds no pointers): tens of MB less to look through a pause */
+        else { uint8_t *c = tl_gc_alloc_data(len); if (!c) { if (owned) free((void *)data); continue; } memcpy(c, data, len); if (owned) free((void *)data); copy = c; }
         char label[96];
         const char *slash = strrchr(path, '/');
         snprintf(label, sizeof(label), "%s!%s", slash ? slash + 1 : path, name);
@@ -2539,7 +2542,7 @@ void tl_dvm_drop_app(void)
         dvm_dex *d = g_dex[i];
         if (!d) continue;
         free(d->mcache); free(d->fcache); free(d->tcache); free(d->scache);
-        free((void *)d->b); free(d); g_dex[i] = NULL;
+        tl_gc_free_data((void *)d->b, d->size); free(d); g_dex[i] = NULL;
     }
     g_ndex = g_nboot_dex;
     g_app_loader = NULL;
@@ -2627,12 +2630,13 @@ static bool DexFile_openInMemory(jobj *self, const jvalue *a, jvalue *ret)
             if (addr) { src = (const uint8_t *)(uintptr_t)dvm_slots(bb)[addr->slot].j + st; len = (size_t)(en - st); }
         }
         if (!src || !len) continue;
-        uint8_t *copy = malloc(len);
+        uint8_t *copy = tl_gc_alloc_data(len);
+        if (!copy) continue;
         memcpy(copy, src, len);
         char label[64]; snprintf(label, sizeof(label), "memory-%d.dex", g_ndex);
         /* TL_DEX_DUMP=<dir>: keep a copy of each dex an app loads from memory, to look at */
         if (getenv("TL_DEX_DUMP")) { char fp[600]; snprintf(fp, sizeof(fp), "%s/%s", getenv("TL_DEX_DUMP"), label); FILE *df = fopen(fp, "wb"); if (df) { fwrite(copy, 1, len, df); fclose(df); } }
-        if (!dex_add(copy, len, label)) free(copy);
+        if (!dex_add(copy, len, label)) tl_gc_free_data(copy, len);
     }
     int count = g_ndex - first;
     g_add_ns = 0;

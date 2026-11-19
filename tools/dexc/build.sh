@@ -11,14 +11,16 @@ case $PLAT in
     *) echo "platform: ios or macos" >&2; exit 1 ;;
 esac
 SYSROOT=$(xcrun --sdk $SDK --show-sdk-path)
-CFLAGS="-target $TARGET -isysroot $SYSROOT -O2 -fwrapv -flto=thin -fPIC -fvisibility=hidden -fno-strict-aliasing -I$R/src/translation-layer-next"
+CFLAGS="-target $TARGET -isysroot $SYSROOT -fwrapv -fPIC -fvisibility=hidden -fno-strict-aliasing -I$R/src/translation-layer-next"
+# hot methods for speed (-O2, thin LTO across the module); the rest of what ran (dexc-cold-*.c) for size and build time
+HOT="-O2 -flto=thin"; COLD="-Os"
 mkdir -p "$OUT"
 for d in "$GEN"/*/; do
     [ -f "$d/name" ] || continue
     name=$(cat "$d/name")
     # one clang per file, as many at once as there are cores (CFLAGS through the environment: xargs -I caps a line at 255 bytes)
-    export CFLAGS
-    printf '%s\n' "$d"/*.c | xargs -P "$(sysctl -n hw.ncpu)" -n 1 sh -c 'clang $CFLAGS -c "$0" -o "$0.o"'
+    export CFLAGS HOT COLD
+    printf '%s\n' "$d"/*.c | xargs -P "$(sysctl -n hw.ncpu)" -n 1 sh -c 'case "$0" in *dexc-cold-*) O=$COLD ;; *) O=$HOT ;; esac; clang $CFLAGS $O -c "$0" -o "$0.o"'
     clang -target $TARGET -isysroot $SYSROOT -O2 -flto=thin -dynamiclib -install_name "@rpath/$name" -o "$OUT/$name" "$d"/*.o
     [ "$PLAT" = macos ] && codesign -s - --force "$OUT/$name" >/dev/null 2>&1
     echo "$OUT/$name: $(ls "$d"/*.c | wc -l | tr -d ' ') files, $(stat -f %z "$OUT/$name") bytes"

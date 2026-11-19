@@ -27,6 +27,38 @@ public class TextureView extends View {
     private final Paint mPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
     private Bitmap mShown;
     private Surface mCanvasSurface;
+
+    /* The video shown by iOS itself under the screen (husk.AvPlayer: a player drawing into this view's texture): this view leaves a
+       see-through hole and says where it is, as SurfaceView does -- no frame is copied or drawn here. */
+    private volatile SurfaceView.VideoLayer mLayer;
+    private boolean mLayerVisible;
+    private int mLayerX, mLayerY, mLayerW = -1, mLayerH;
+    private final Paint mClear = new Paint();
+    { mClear.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)); }
+    /** Whether the iOS video layer can stand for this view: it shows the picture untransformed (setTransform not used). */
+    public boolean huskLayerable() { return mMatrix.isIdentity(); }
+    public void huskSetVideoLayer(SurfaceView.VideoLayer l) {
+        SurfaceView.VideoLayer old = mLayer;
+        mLayer = l;
+        if (old != null && old != l) old.frame(0, 0, 0, 0, false);
+        mLayerVisible = false; mLayerW = -1;
+        post(this::updateLayer);
+        postInvalidate();
+    }
+    private void updateLayer() {
+        SurfaceView.VideoLayer l = mLayer;
+        if (l == null) return;
+        boolean visible = isAttachedToWindow() && isShown() && getWindowVisibility() == VISIBLE && getWidth() > 0 && getHeight() > 0;
+        int[] loc = new int[2];
+        if (visible) getLocationOnScreen(loc);
+        if (visible == mLayerVisible && (!visible || (loc[0] == mLayerX && loc[1] == mLayerY && getWidth() == mLayerW && getHeight() == mLayerH))) return;
+        mLayerVisible = visible; mLayerX = loc[0]; mLayerY = loc[1]; mLayerW = getWidth(); mLayerH = getHeight();
+        l.frame(loc[0], loc[1], getWidth(), getHeight(), visible);
+    }
+    @Override public void layout(int l, int t, int r, int b) { super.layout(l, t, r, b); if (mLayer != null) post(this::updateLayer); }
+    @Override protected void onScrollChanged(int l, int t, int ol, int ot) { super.onScrollChanged(l, t, ol, ot); updateLayer(); }
+    @Override protected void onVisibilityChanged(View changed, int v) { super.onVisibilityChanged(changed, v); updateLayer(); }
+    @Override protected void onWindowVisibilityChanged(int v) { super.onWindowVisibilityChanged(v); updateLayer(); }
     public TextureView(android.content.Context c) { super(c); }
     public TextureView(android.content.Context c, android.util.AttributeSet a) { super(c, a); }
     public TextureView(android.content.Context c, android.util.AttributeSet a, int s) { super(c, a, s); }
@@ -88,9 +120,15 @@ public class TextureView extends View {
         }
         if (mCanvasSurface != null) { mCanvasSurface.release(); mCanvasSurface = null; }
         mShown = null;
+        updateLayer();
     }
     @Override public void draw(Canvas c) {
         super.draw(c);
+        if (mLayer != null) {                               /* iOS shows the video under the screen: a hole for it */
+            c.drawRect(0, 0, getWidth(), getHeight(), mClear);
+            updateLayer();
+            return;
+        }
         SurfaceTexture t = mTexture;
         Bitmap f = t != null ? t.huskFront() : null;
         if (f != null) {
