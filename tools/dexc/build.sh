@@ -16,7 +16,9 @@ mkdir -p "$OUT"
 for d in "$GEN"/*/; do
     [ -f "$d/name" ] || continue
     name=$(cat "$d/name")
-    ls "$d"/*.c | xargs -P "$(sysctl -n hw.ncpu)" -I{} sh -c "clang $CFLAGS -c '{}' -o '{}.o'"
+    # one clang per file, as many at once as there are cores (CFLAGS through the environment: xargs -I caps a line at 255 bytes)
+    export CFLAGS
+    printf '%s\n' "$d"/*.c | xargs -P "$(sysctl -n hw.ncpu)" -n 1 sh -c 'clang $CFLAGS -c "$0" -o "$0.o"'
     clang -target $TARGET -isysroot $SYSROOT -dynamiclib -install_name "@rpath/$name" -o "$OUT/$name" "$d"/*.o
     [ "$PLAT" = macos ] && codesign -s - --force "$OUT/$name" >/dev/null 2>&1
     echo "$OUT/$name: $(ls "$d"/*.c | wc -l | tr -d ' ') files, $(stat -f %z "$OUT/$name") bytes"
