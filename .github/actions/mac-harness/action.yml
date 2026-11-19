@@ -1,0 +1,60 @@
+# The Mac harness (tools/javaapp-test.c) built from this repository, and the Java runtime it needs from the official Husk IPA
+# with this repository's framework (packager/runtime). Leaves ./javaapp-test and the TL_* environment for the next steps.
+name: Mac harness and Java runtime
+description: Build javaapp-test and set up the Java runtime it runs apps with
+inputs:
+  package:
+    description: Package name of the app to run (TL_PACKAGE)
+    default: ""
+  husk-repo:
+    default: Leviidev/Husk
+  husk-release:
+    default: "3.4"
+  github-token:
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Build harness (javaapp-test)
+      shell: bash
+      run: |
+        # -O2 as the app's release build: the interpreter compared with compiled methods at the same optimization
+        bash tools/regress/build.sh tools/javaapp-test.c "$GITHUB_WORKSPACE/javaapp-test" -O2 2>&1 | grep -E "error" || true
+        test -x "$GITHUB_WORKSPACE/javaapp-test"
+
+    - name: Java runtime from the Husk IPA
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        [ -f dl/Husk.ipa ] || gh release download "${{ inputs.husk-release }}" -R "${{ inputs.husk-repo }}" -p Husk.ipa -D dl
+        unzip -q -o dl/Husk.ipa 'Payload/Husk.app/java-runtime/*' 'Payload/Husk.app/android-system/*' -d dl/ipa
+        JR="$GITHUB_WORKSPACE/dl/ipa/Payload/Husk.app/java-runtime"
+        cp packager/runtime/husk-framework.dex packager/runtime/husk-framework-core.dex "$JR/"
+        # the harness reads the trusted roots from the conscrypt module; the app ships them in android-system
+        cp -R dl/ipa/Payload/Husk.app/android-system/cacerts "$JR/com.android.conscrypt/cacerts"
+        # the harness reads org.apache.http.legacy.jar from its author's drive
+        sudo mkdir -p /Volumes/GTAV/husk2/modules/jars
+        sudo cp "$JR/org.apache.http.legacy.jar" /Volumes/GTAV/husk2/modules/jars/
+        # ANGLE (EGL/GLES over Metal) for macOS: from an installed Chromium browser, else Chrome's headless shell
+        EGL=$(find /Applications -name libEGL.dylib 2>/dev/null | grep -v SwiftShader | head -1)
+        if [ -z "$EGL" ]; then
+          (cd "$RUNNER_TEMP" && npx -y @puppeteer/browsers install chrome-headless-shell@stable >/dev/null)
+          EGL=$(find "$RUNNER_TEMP/chrome-headless-shell" -name libEGL.dylib | head -1)
+        fi
+        GLES=$(dirname "$EGL")/libGLESv2.dylib
+        echo "ANGLE: $EGL"
+        test -f "$EGL"
+        test -f "$GLES"
+        {
+          echo "TL_ART=$JR/com.android.art"
+          echo "TL_FRAMEWORK=$JR/husk-framework.dex"
+          echo "TL_FRAMEWORK_CORE=$JR/husk-framework-core.dex"
+          echo "TL_FRAMEWORK_RES=$JR/framework-res.apk"
+          echo "TL_SYSFONTS=$GITHUB_WORKSPACE/dl/ipa/Payload/Husk.app/android-system"
+          echo "TL_ANGLE_EGL=$EGL"
+          echo "TL_ANGLE_GLES=$GLES"
+          echo "DYLD_LIBRARY_PATH=$(dirname "$EGL")"
+          echo "TL_TMP=$RUNNER_TEMP"
+          echo "TL_PACKAGE=${{ inputs.package }}"
+        } >> "$GITHUB_ENV"

@@ -3,6 +3,7 @@
 #     AVPlayer bridge, ClearKey), icons and translations; the base's Husk app extensions are left out,
 #   - JIT-less dylibs made from Husk's Java runtime libraries and the native libraries of every APK in packager/input,
 #   - this repository's Java framework (packager/runtime/*.dex),
+#   - compiled Dalvik methods (dexc-v*-<dex signature>.dylib): the hot methods of the APKs and of the boot class path,
 #   - the home-screen name "DroidRun".
 # Output: the "DroidRun-ipa" artifact. Install it with Sideloadly.
 #
@@ -15,6 +16,9 @@ on:
       name:
         description: "Name under the icon"
         default: "DroidRun"
+      profile_seconds:
+        description: "Seconds each APK runs on the Mac to find its hot methods (the dex compiler)"
+        default: "90"
 
 env:
   HUSK_REPO: Leviidev/Husk
@@ -117,8 +121,55 @@ jobs:
           path: out/*.dylib
           retention-days: 7
 
+  # The dex compiler: each APK in packager/input runs on the Mac harness for a while, interpreted, counting its methods' calls
+  # (TL_DVM_PROFILE); the hot ones -- in the APKs and in the boot class path every app runs (libcore, the framework) -- are
+  # compiled to C (tools/dexc) and into one iOS dylib per DEX file, which the app loads in place of interpreting them.
+  dexc:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/mac-harness
+        with:
+          github-token: ${{ github.token }}
+
+      - name: Profile the apps
+        run: |
+          mkdir -p out
+          AAPT2=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -1)
+          for apk in packager/input/*.apk; do
+            pkg=$([ -n "$AAPT2" ] && "$AAPT2" dump packagename "$apk" 2>/dev/null || true)
+            echo "== $apk ($pkg)"
+            TL_PACKAGE="$pkg" TL_DEXC=0 TL_DVM_PROFILE="$GITHUB_WORKSPACE/out/p-$(basename "$apk").txt" \
+              ./javaapp-test "$apk" ${{ inputs.profile_seconds }} 856 1852 > "out/$(basename "$apk").log" 2>&1 || true
+            wc -l < "out/p-$(basename "$apk").txt" 2>/dev/null || echo "no profile"
+          done
+          cat out/p-*.txt > out/profile.txt 2>/dev/null || true
+          echo "hot methods: $(wc -l < out/profile.txt)"
+
+      - name: Compile hot methods
+        run: |
+          for f in packager/input/*.apk "$TL_FRAMEWORK" "$TL_FRAMEWORK_CORE" "$TL_ART"/javalib/*.jar; do
+            python3 tools/dexc/dexc.py "$f" dexc-gen --profile out/profile.txt --max 6000
+          done
+          bash tools/dexc/build.sh dexc-gen dexc-out ios
+          ls -la dexc-out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dexc
+          path: dexc-out/*.dylib
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dexc-profile
+          path: out/
+          retention-days: 7
+
   ipa:
-    needs: [app, dylibs]
+    needs: [app, dylibs, dexc]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -134,6 +185,7 @@ jobs:
 
       - name: Pack
         run: |
+          cp art/dexc/*.dylib art/dylibs/ 2>/dev/null || echo "no compiled methods"
           python3 packager/pack.py dl/Husk.ipa art/dylibs DroidRun.ipa \
             --app art/app --runtime packager/runtime --name "${{ inputs.name }}"
 

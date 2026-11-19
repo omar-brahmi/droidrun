@@ -23,7 +23,8 @@ import re
 import sys
 import zipfile
 
-AOT_NAME = re.compile(r"^aot-v\d+-[0-9a-f]{16}-.+\.dylib$")
+# the JIT-less library dylibs, and the compiled Dalvik methods' (tools/dexc), named after their DEX file's signature
+AOT_NAME = re.compile(r"^(aot-v\d+-[0-9a-f]{16}-.+|dexc-v\d+-[0-9a-f]{16})\.dylib$")
 BASE_APP = "Payload/Husk.app/"
 BASE_ID = "com.husk.app"
 # never taken from the base when the bundle is rebuilt: signatures, provisioning and the extensions
