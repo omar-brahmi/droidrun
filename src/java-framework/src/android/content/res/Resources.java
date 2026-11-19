@@ -43,7 +43,35 @@ public class Resources {
         if (c != null) mConfig.updateFrom(c);
         updateCfg();
         loadTables();
+        synchronized (sAll) { sAll.add(new java.lang.ref.WeakReference<>(this)); }
     }
+
+    /* every Resources made, for the screen turning: each follows the device's new size and orientation */
+    private static final java.util.ArrayList<java.lang.ref.WeakReference<Resources>> sAll = new java.util.ArrayList<>();
+    /** Husk: the screen turned (husk.AppRunner): the device's size, orientation and the qualifiers resources are chosen by. */
+    public static void huskScreenChanged() {
+        Configuration dev = Configuration.huskDevice();
+        java.util.ArrayList<Resources> live = new java.util.ArrayList<>();
+        synchronized (sAll) {
+            for (java.util.Iterator<java.lang.ref.WeakReference<Resources>> it = sAll.iterator(); it.hasNext(); ) {
+                Resources r = it.next().get();
+                if (r == null) it.remove(); else live.add(r);
+            }
+        }
+        if (sSystem != null && !live.contains(sSystem)) live.add(sSystem);
+        for (Resources r : live) r.followScreen(dev);
+    }
+    private void followScreen(Configuration dev) {
+        mConfig.orientation = dev.orientation;
+        mConfig.screenWidthDp = dev.screenWidthDp;
+        mConfig.screenHeightDp = dev.screenHeightDp;
+        mConfig.screenLayout = (mConfig.screenLayout & SCREENLAYOUT_KEEP) | (dev.screenLayout & ~SCREENLAYOUT_KEEP);
+        mMetrics.widthPixels = husk.Native.screenWidth();
+        mMetrics.heightPixels = husk.Native.screenHeight();
+        updateCfg();
+        mDrawableCache.clear(); mColorCache.clear();
+    }
+    private static final int SCREENLAYOUT_KEEP = Configuration.SCREENLAYOUT_LAYOUTDIR_MASK;
     private void updateCfg() {
         // Android's ResourcesImpl: the configuration's density is the metrics' density. A Resources made with a fresh DisplayMetrics
         // (density 0) otherwise picks mdpi entries, which the trimmed framework-res does not carry.

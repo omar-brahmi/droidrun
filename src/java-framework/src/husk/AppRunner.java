@@ -329,7 +329,7 @@ public final class AppRunner {
     }
 
     // ---- input from Husk
-    /** events: [n, then n x (phase, id, xbits, ybits)] -- phase 0 down, 1 move, 2 up, 3 cancel; 4 key (id = code, x = down); 5 back; 6 host pause (id 1) / resume (0); 7 text waiting; 8 insets changed; 9 web view events waiting */
+    /** events: [n, then n x (phase, id, xbits, ybits)] -- phase 0 down, 1 move, 2 up, 3 cancel; 4 key (id = code, x = down); 5 back; 6 host pause (id 1) / resume (0); 7 text waiting; 8 insets changed; 9 web view events waiting; 10 the screen turned (new size) */
     private static void deliver(int[] ev) {
         int n = ev[0];
         for (int k = 0; k < n; k++) {
@@ -341,6 +341,7 @@ public final class AppRunner {
                 if (phase == 7) { InputMethods.deliverPending(); continue; }
                 if (phase == 8) { applyInsets(); continue; }
                 if (phase == 9) { Web.deliver(); continue; }
+                if (phase == 10) { screenChanged(); continue; }
                 if (phase == 4) {
                     long t = SystemClock.uptimeMillis();
                     KeyEvent ke = new KeyEvent(t, t, ev[3 + 4 * k] != 0 ? KeyEvent.ACTION_DOWN : KeyEvent.ACTION_UP, id, 0);
@@ -353,6 +354,25 @@ public final class AppRunner {
                 throw e;
             }
         }
+    }
+    /**
+     * The screen turned (or its size changed): as Android for an activity that handles the change itself (configChanges), the
+     * resources follow the new configuration, the application, each activity and each window's views hear onConfigurationChanged,
+     * and the windows are laid out again at the new size. Nothing is restarted.
+     */
+    private static void screenChanged() {
+        android.content.res.Resources.huskScreenChanged();
+        android.content.res.Configuration c = new android.content.res.Configuration(sApp != null ? sApp.getResources().getConfiguration() : android.content.res.Configuration.huskDevice());
+        android.util.Log.i("DroidRun", "screen " + Native.screenWidth() + "x" + Native.screenHeight() + ", " + (c.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE ? "landscape" : "portrait"));
+        if (sApp != null) {
+            try { sApp.onConfigurationChanged(new android.content.res.Configuration(c)); }
+            catch (RuntimeException e) { android.util.Log.w("DroidRun", "application onConfigurationChanged threw", e); }
+        }
+        for (Activity a : new java.util.ArrayList<>(sStack)) {
+            try { a.onConfigurationChanged(new android.content.res.Configuration(c)); }
+            catch (RuntimeException e) { android.util.Log.w("DroidRun", a.getClass().getName() + ".onConfigurationChanged threw", e); }
+        }
+        ViewRoot.screenChanged(c);
     }
     /** The screen's notch / home indicator areas and the keyboard, from the host. */
     private static void applyInsets() {

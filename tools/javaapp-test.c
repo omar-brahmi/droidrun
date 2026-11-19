@@ -5,7 +5,7 @@
  *   javaapp-test <apk> [seconds] [width height]
  *
  * Environment: TL_JNI_TRACE=1|2, TL_VERBOSE=0..2, TL_DATA=<dir> (kept between runs), TL_PACKAGE, TL_AUDIO=1,
- * TL_CTL=<file> (lines "tap X Y", "hold X Y MS", "swipe X1 Y1 X2 Y2 MS", "wait MS", "shot PNG" (+ PNG.web.png of a web view), "js CODE", "key CODE", "pause",
+ * TL_CTL=<file> (lines "tap X Y", "hold X Y MS", "swipe X1 Y1 X2 Y2 MS", "wait MS", "shot PNG" (+ PNG.web.png of a web view), "js CODE", "key CODE", "size W H" (the screen turns), "pause",
  * "resume", "stacks" (every thread's frames), "quit"), TL_FRAMES=<n> (save every nth frame; default every frame, latest only).
  */
 #include <mach/mach.h>
@@ -160,7 +160,19 @@ static void h_keyboard(int show, int type, int ime) { fprintf(stderr, "host: key
 static void h_set_clip(const char *t) { free(g_clip); g_clip = strdup(t); fprintf(stderr, "host: clipboard = %.60s\n", t); }
 static char *h_get_clip(void) { return g_clip ? strdup(g_clip) : NULL; }
 static void h_share(const char *t) { fprintf(stderr, "host: share %.80s\n", t); }
-static void h_orientation(int o) { fprintf(stderr, "host: orientation %d\n", o); }
+/* as the iPhone's host: the screen turns to what the app asks (SCREEN_ORIENTATION_*), back to the launch's way for the rest */
+static int g_launch_w, g_launch_h, g_cur_w, g_cur_h;
+static void h_orientation(int o)
+{
+    fprintf(stderr, "host: orientation %d\n", o);
+    if (!g_launch_w || o == 5 || o == 14) return;
+    bool land = o == 0 || o == 6 || o == 8 || o == 11, port = o == 1 || o == 7 || o == 9 || o == 12;
+    int lw = g_launch_w > g_launch_h ? g_launch_w : g_launch_h, lh = g_launch_w > g_launch_h ? g_launch_h : g_launch_w;
+    int w = land ? lw : port ? lh : g_launch_w, h = land ? lh : port ? lw : g_launch_h;
+    if (w == g_cur_w && h == g_cur_h) return;
+    g_cur_w = w; g_cur_h = h;
+    tl_javaapp_resize(w, h);
+}
 static void *control_thread(void *arg)
 {
     const char *path = arg;
@@ -192,6 +204,7 @@ static void *control_thread(void *arg)
             else if (!strncmp(line, "del", 3)) tl_javaapp_text_delete();
             else if (!strncmp(line, "enter", 5)) tl_javaapp_text_action();
             else if (!strncmp(line, "back", 4)) tl_javaapp_back();
+            else if (sscanf(line, "size %f %f", &a, &b) == 2) { g_cur_w = (int)a; g_cur_h = (int)b; tl_javaapp_resize(g_cur_w, g_cur_h); }
             else if (!strncmp(line, "stacks", 6)) dump_stacks();
             else if (!strncmp(line, "pause", 5)) tl_javaapp_set_paused(true);
             else if (!strncmp(line, "resume", 6)) tl_javaapp_set_paused(false);
@@ -259,6 +272,7 @@ static void *run(void *p)
     g_frame_dir = frames;
     fprintf(stderr, "frames: %s\ndata: %s\n", frames, tmp);
     int w = argc > 4 ? atoi(argv[3]) : 804, h = argc > 4 ? atoi(argv[4]) : 1748;
+    g_launch_w = g_cur_w = w; g_launch_h = g_cur_h = h;
     /* A folder is an app as Google Play delivers it: <package>.apk and its splits and asset packs (<package>.<split>.apk), as the app
        is given them; TL_SPLITS (colon-separated) adds split APKs to a single APK */
     static char base[1024];

@@ -220,6 +220,8 @@ NAT(A_buffered)
 }
 
 /* 1 idle, 2 buffering, 3 ready, 4 ended, -1 failed */
+static void relink_view(avp *p);
+
 NAT(A_state)
 {
     (void)self;
@@ -253,6 +255,7 @@ NAT(A_state)
                 AVPlayer *np = [[AVPlayer alloc] initWithPlayerItem:ni];
                 np.automaticallyWaitsToMinimizeStalling = YES; np.volume = vol;
                 CFRelease(p->player); p->player = (void *)CFBridgingRetain(np);
+                relink_view(p);                                    /* the picture on screen is the new player's */
                 if (rate > 0 || wants_play(p)) [np play];
                 pl = np;
             }
@@ -356,6 +359,18 @@ void tl_web_video_shown(int delta);
 #endif
 #define VIEW(p) ((__bridge HuskVideoView *)(p)->view)
 
+/* the view shows p's player, which a retry through the local server replaces (main thread; p's lock keeps the player alive) */
+static void relink_view(avp *p)
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!p->view) return;
+        pthread_mutex_lock(&p->lock);
+        AVPlayer *pl = p->player ? PLAYER(p) : nil;
+        if (pl && VLAYER(VIEW(p)).player != pl) VLAYER(VIEW(p)).player = pl;
+        pthread_mutex_unlock(&p->lock);
+    });
+}
+
 /* nLayerSupported(): whether videos show through layers. On the iPhone yes (TL_VIDEO_LAYER=0: no); on a Mac harness only with
  * TL_VIDEO_LAYER=1, since its screenshots are the app's GL frames, which the layer is not in. */
 NAT(A_layerSupported)
@@ -402,6 +417,9 @@ NAT(A_layer)
 #endif
         }
         if (!v) return;
+        pthread_mutex_lock(&p->lock);
+        if (p->player && VLAYER(v).player != PLAYER(p)) VLAYER(v).player = PLAYER(p);
+        pthread_mutex_unlock(&p->lock);
         float s = tl_web_scale();
         v.frame = CGRectMake(x / s, y / s, w / s, h / s);
         VLAYER(v).videoGravity = fill ? AVLayerVideoGravityResizeAspectFill : AVLayerVideoGravityResizeAspect;

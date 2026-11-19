@@ -178,6 +178,16 @@ public final class ViewRoot implements ViewParent {
 
     // ---- insets from the host
     /** The screen's insets in pixels (Husk's host tells them), and the keyboard's height. */
+    /** The screen turned: each window's views hear the new configuration and are laid out again at the screen's new size. */
+    public static void screenChanged(android.content.res.Configuration c) {
+        for (ViewRoot v : new ArrayList<>(sRoots)) {
+            if (v.mRemoved) continue;
+            try { v.mView.dispatchConfigurationChanged(new android.content.res.Configuration(c)); }
+            catch (RuntimeException e) { android.util.Log.w("DroidRun", "onConfigurationChanged threw in " + v.mView.getClass().getName(), e); }
+            v.mView.requestLayout();
+            v.requestApplyInsets();
+        }
+    }
     public static void setInsets(int l, int t, int r, int b) { sInsets = new int[] { l, t, r, b }; for (ViewRoot v : sRoots) v.requestApplyInsets(); }
     public static void setImeHeight(int h) { if (h != sImeBottom) { sImeBottom = h; for (ViewRoot v : sRoots) v.requestApplyInsets(); } }
     public static int imeHeight() { return sImeBottom; }

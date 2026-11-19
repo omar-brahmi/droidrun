@@ -400,6 +400,15 @@ void tl_javaapp_documents_picked(const char *const *paths, int n)
     for (int i = 0; i < n; i++) if (paths[i] && *paths[i]) text_push("f", paths[i]);
     text_push("F", NULL);
 }
+void tl_nwindow_resize(int w, int h);
+void tl_javaapp_resize(int w, int h)
+{
+    if (w <= 0 || h <= 0 || (w == A.cfg.width && h == A.cfg.height)) return;
+    tl_log_line("javaapp: the screen is now %dx%d", w, h);
+    A.cfg.width = w; A.cfg.height = h;
+    tl_nwindow_resize(w, h);
+    tl_javaapp_touch(10, 0, 0, 0);
+}
 void tl_javaapp_set_insets(int l, int t, int r, int b, int ime)
 {
     A.insets[0] = l; A.insets[1] = t; A.insets[2] = r; A.insets[3] = b; A.insets[4] = ime;
@@ -911,6 +920,8 @@ static void *gl_main(void *arg)
     unsigned (*makeCurrent)(EGLDisplay, EGLSurface, EGLSurface, EGLContext) = tl_egl_resolve("eglMakeCurrent");
     unsigned (*swapBuffers)(EGLDisplay, EGLSurface) = tl_egl_resolve("eglSwapBuffers");
     unsigned (*swapInterval)(EGLDisplay, EGLint) = tl_egl_resolve("eglSwapInterval");
+    unsigned (*querySurface)(EGLDisplay, EGLSurface, EGLint, EGLint *) = tl_egl_resolve("eglQuerySurface");
+    unsigned (*destroySurface)(EGLDisplay, EGLSurface) = tl_egl_resolve("eglDestroySurface");
     if (!getDisplay || !createWindowSurface || !swapBuffers) { tl_log_line("javaapp: EGL is not available"); return NULL; }
     EGLDisplay dpy = getDisplay(NULL);
     EGLint major = 0, minor = 0;
@@ -943,9 +954,26 @@ static void *gl_main(void *arg)
     jobj *gl10 = NULL;
     jvalue p1[1];
     int64_t next = now_ns();
+    int surf_w = A.cfg.width, surf_h = A.cfg.height;
     while (!atomic_load(&A.ended)) {
         if (atomic_load(&A.paused)) { usleep(20000); next = now_ns(); continue; }
         bool drew = false;
+        /* the screen turned: a layer the platform resizes itself (the iPhone's) keeps its surface; one that does not (the Mac
+           harness's off-screen buffer) gets a new one at the new size */
+        int cw = A.cfg.width, ch = A.cfg.height;
+        if (cw != surf_w || ch != surf_h) {
+            surf_w = cw; surf_h = ch;
+            EGLint qw = 0, qh = 0;
+            if (querySurface) { querySurface(dpy, surf, 0x3057, &qw); querySurface(dpy, surf, 0x3056, &qh); }
+            if (destroySurface && (qw != cw || qh != ch)) {
+                makeCurrent(dpy, NULL, NULL, NULL);
+                EGLSurface ns = createWindowSurface(dpy, cfg, tl_nwindow_get(), NULL);
+                if (ns) { destroySurface(dpy, surf); surf = ns; }
+                tl_log_line("javaapp: screen surface %s at %dx%d (was %dx%d)", ns ? "made again" : "could not be made again", cw, ch, qw, qh);
+            }
+            makeCurrent(dpy, surf, surf, ui);
+            atomic_store(&A.render_requested, true);
+        }
         /* the app's renderer, once its GLSurfaceView is on screen */
         if (__atomic_load_n(&A.gl_renderer, __ATOMIC_ACQUIRE) && !app) {
             /* GLSurfaceView's default is OpenGL ES 1 (fixed function, through ANGLE's ES1 front end); 2 and 3 as asked */

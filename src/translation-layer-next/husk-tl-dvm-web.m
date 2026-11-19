@@ -231,12 +231,24 @@ static NSString *bridge_js(void)
             "window.addEventListener('error',function(e){try{window.webkit.messageHandlers.huskConsole.postMessage({l:4,m:'Uncaught '+e.message+(e.error&&e.error.stack?' | '+String(e.error.stack).slice(0,600):''),s:e.filename||'',n:e.lineno||0});}catch(x){}});})();";
 }
 
+/* A page's sound on or off (WebKit's _setPageMuted:, _WKMediaAudioMuted). Pages the app does not show stay silent: apps load
+ * players in hidden WebViews to find a stream's address (PrimeTV), and an Android WebView there asks for a touch before playing
+ * sound, where these play at once. */
+static void set_page_muted(WKWebView *w, bool muted)
+{
+    SEL s = NSSelectorFromString(@"_setPageMuted:");
+    if (!w || ![w respondsToSelector:s]) return;
+    void (*f)(id, SEL, NSUInteger) = (void (*)(id, SEL, NSUInteger))[w methodForSelector:s];
+    f(w, s, muted ? 1 : 0);
+}
+
 @interface HuskWeb : NSObject <WKNavigationDelegate, WKUIDelegate, WKURLSchemeHandler, WKScriptMessageHandler>
 @property (nonatomic) int wid;
 @property (nonatomic, strong) WKWebView *web;
 @property (nonatomic) bool apiLoad;            /* the next navigation is the app's own loadUrl: not offered to shouldOverrideUrlLoading */
 @property (nonatomic, strong) NSMutableArray<NSString *> *scripts;
 @property (nonatomic) bool edgeLinked;
+@property (nonatomic) bool audible;            /* shown on screen at a size a person sees: its sound is heard */
 @end
 
 @implementation HuskWeb
@@ -275,6 +287,7 @@ static NSString *bridge_js(void)
     _web.scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
 #endif
     _web.hidden = YES;
+    set_page_muted(_web, true);
 #if !TARGET_OS_IPHONE
     /* the harness's window is off-screen: without this the page counts as hidden (no animation frames, nothing composited) */
     @try { [_web setValue:@NO forKey:@"_windowOcclusionDetectionEnabled"]; } @catch (NSException *e) {}
@@ -286,16 +299,28 @@ static NSString *bridge_js(void)
     if (g_container) [g_container addSubview:_web];
     return self;
 }
+/* WebView.destroy: the page ends -- its players, scripts and timers -- and the WKWebView is let go. Its configuration holds this
+ * object (the huskapp: scheme handler) and this object the view, so the view is dropped here; kept, it went on playing whatever
+ * the page played, off screen and for good. */
 - (void)teardown
 {
-    [_web removeObserver:self forKeyPath:@"title"];
-    [_web removeObserver:self forKeyPath:@"estimatedProgress"];
-    [_web removeObserver:self forKeyPath:@"URL"];
-    [_web stopLoading];
-    [_web.configuration.userContentController removeScriptMessageHandlerForName:@"huskConsole"];
-    _web.navigationDelegate = nil;
-    _web.UIDelegate = nil;
-    [_web removeFromSuperview];
+    WKWebView *w = _web;
+    if (!w) return;
+    _web = nil;
+    [w removeObserver:self forKeyPath:@"title"];
+    [w removeObserver:self forKeyPath:@"estimatedProgress"];
+    [w removeObserver:self forKeyPath:@"URL"];
+    set_page_muted(w, true);
+    if (@available(iOS 15.0, macOS 12.0, *)) {
+        [w pauseAllMediaPlaybackWithCompletionHandler:nil];
+        [w closeAllMediaPresentationsWithCompletionHandler:nil];
+    }
+    [w stopLoading];
+    [w.configuration.userContentController removeScriptMessageHandlerForName:@"huskConsole"];
+    w.navigationDelegate = nil;
+    w.UIDelegate = nil;
+    [w loadHTMLString:@"" baseURL:nil];
+    [w removeFromSuperview];
 }
 - (void)observeValueForKeyPath:(NSString *)kp ofObject:(id)o change:(NSDictionary *)ch context:(void *)ctx
 {
@@ -477,6 +502,10 @@ NAT(W_frame)
 #endif
         h.web.frame = r;
         h.web.hidden = !vis;
+        /* heard only when seen: a page the app keeps hidden, tiny (1 px "headless" ones) or off the screen is silent */
+        CGRect box = g_container ? g_container.bounds : CGRectZero;
+        bool audible = vis && r.size.width >= 40 && r.size.height >= 40 && (CGRectIsEmpty(box) || CGRectIntersectsRect(r, box));
+        if (audible != h.audible) { h.audible = audible; set_page_muted(h.web, !audible); }
         set_screen_opaque(atomic_load(&g_visible_webs) + atomic_load(&g_visible_videos) == 0);
     });
     return true;

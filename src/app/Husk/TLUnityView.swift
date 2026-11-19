@@ -51,6 +51,52 @@ final class TLUnityUIView: UIView, UIKeyInput {
     private(set) var launchedSize: CGSize?
     /// In a floating window rather than full screen: no notch or home indicator to keep clear of.
     var windowed = false
+    /// A Java app's screen in pixels as it last laid itself out: when the screen turns it is laid out again (husk_java_resize).
+    private var javaSize = (0, 0)
+    /// How much of a Java app's screen the keyboard covers, in pixels, as last told: the insets go again when the screen turns.
+    private var javaKeyboard: Int32 = 0
+    /// Which ways a Java app's screen may face when the app asks for none in particular: the manifest's or the app's settings',
+    /// else every way the phone turns, as an Android phone with auto-rotate on.
+    @MainActor static var javaDefaultMask: UIInterfaceOrientationMask = .portrait
+    /// Which ways it may face now: the default, or what the app asked for last (a video player going full screen asks for landscape).
+    @MainActor static var javaMask: UIInterfaceOrientationMask = .portrait
+    /// The Java app that is running, whose screen keeps its orientation when it is shown again.
+    @MainActor static var javaRunningApk: String?
+
+    /// Activity.setRequestedOrientation (ActivityInfo.SCREEN_ORIENTATION_*): the screen turns as the app asks, and the app is laid
+    /// out again at the new size when it has.
+    @MainActor static func javaAsked(_ o: Int32) {
+        let mask: UIInterfaceOrientationMask
+        switch o {
+        case 0, 6, 8, 11: mask = .landscape                // LANDSCAPE, SENSOR_LANDSCAPE, REVERSE_LANDSCAPE, USER_LANDSCAPE
+        case 1, 7, 9, 12: mask = .portrait                 // PORTRAIT, SENSOR_PORTRAIT, REVERSE_PORTRAIT, USER_PORTRAIT
+        case 5, 14: return                                 // NOSENSOR, LOCKED: as it is
+        default: mask = javaDefaultMask                    // UNSPECIFIED, USER, SENSOR, FULL_SENSOR, BEHIND...
+        }
+        javaMask = mask
+        if HuskOrientation.mask != mask { HuskOrientation.set(mask) }
+    }
+
+    /// The part of this view under the notch, the rounded corners and the home indicator, in points. A Java app's screen begins
+    /// below the notch in portrait (TLCocosAttemptView), so there it is the bottom only; turned, the sides.
+    private var javaInsets: UIEdgeInsets {
+        guard !windowed, let window else { return .zero }
+        let s = window.safeAreaInsets, f = convert(bounds, to: window), wb = window.bounds
+        return UIEdgeInsets(top: max(0, s.top - f.minY), left: max(0, s.left - f.minX),
+                            bottom: max(0, s.bottom - (wb.maxY - f.maxY)), right: max(0, s.right - (wb.maxX - f.maxX)))
+    }
+
+    /// The notch, the home indicator and the keyboard, in the surface's pixels, told to a Java app.
+    private func sendJavaInsets() {
+        guard engine == .java, launched else { return }
+        let k = contentScaleFactor, inset = javaInsets
+        husk_java_set_insets(Int32(inset.left * k), Int32(inset.top * k), Int32(inset.right * k), Int32(inset.bottom * k), javaKeyboard)
+    }
+
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        sendJavaInsets()
+    }
     /// Where the corner statistics go when this view does not draw them itself (a landscape game has its own bar).
     var onStats: ((String) -> Void)?
     /// Active touches by UITouch identity, each given a small stable id like Android's pointer ids.
@@ -185,8 +231,9 @@ final class TLUnityUIView: UIView, UIKeyInput {
         let mine = convert(bounds, to: window)
         let covered = hiding ? 0 : max(0, mine.maxY - window.convert(end, from: nil).minY)
         if engine == .java {
-            let k = contentScaleFactor, inset = windowed ? UIEdgeInsets.zero : window.safeAreaInsets
-            husk_java_set_insets(Int32(inset.left * k), Int32(inset.top * k), Int32(inset.right * k), Int32(inset.bottom * k), Int32((covered * k).rounded()))
+            let k = contentScaleFactor, inset = javaInsets
+            javaKeyboard = Int32((covered * k).rounded())
+            husk_java_set_insets(Int32(inset.left * k), Int32(inset.top * k), Int32(inset.right * k), Int32(inset.bottom * k), javaKeyboard)
             if hiding, isFirstResponder == false { husk_java_keyboard_closed() }
             return
         }
@@ -220,6 +267,13 @@ final class TLUnityUIView: UIView, UIKeyInput {
         // Flutter lays itself out again at any size, as an Android view does when its window changes: a window being resized, the
         // screen turning.
         if engine == .flutter, launched { husk_flutter_resize(Int32(w), Int32(h)) }
+        // A Java app too, full screen: the screen turned, as the app asked or with the phone. Its activities hear the new
+        // configuration and its windows are laid out again at the new size (a video player's picture follows its SurfaceView).
+        if engine == .java, launched, !windowed, javaSize != (w, h) {
+            javaSize = (w, h)
+            husk_java_resize(Int32(w), Int32(h))
+            sendJavaInsets()
+        }
         // A landscape game is told its size once, when it starts, so it must not start while the screen is still
         // turning: wait for a surface that is wider than it is tall.
         // Unity games too: Fruit Ninja is a landscape one. If the screen has not turned after two seconds it is not going to,
@@ -317,12 +371,19 @@ final class TLUnityUIView: UIView, UIKeyInput {
             husk_java_set_runtime((Bundle.main.resourcePath ?? "") + "/java-runtime", Float(contentScaleFactor))
             husk_java_set_night_mode(traitCollection.userInterfaceStyle == .dark ? 1 : 0)
             // The notch and the home indicator, in surface pixels: the app's window keeps its content out of them.
-            if let inset = windowed ? UIEdgeInsets.zero : window?.safeAreaInsets {
-                let k = contentScaleFactor
+            do {
+                let k = contentScaleFactor, inset = javaInsets
                 husk_java_set_insets(Int32(inset.left * k), Int32(inset.top * k), Int32(inset.right * k), Int32(inset.bottom * k), 0)
             }
             attachWebHost(fresh: true)
+            javaSize = (width, height)
             started = husk_java_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
+            if started {
+                // from now on the screen may turn: as the manifest or settings say, or as the app asks
+                TLUnityUIView.javaRunningApk = apk
+                TLUnityUIView.javaMask = TLUnityUIView.javaDefaultMask
+                DispatchQueue.main.async { if HuskOrientation.mask != TLUnityUIView.javaMask { HuskOrientation.set(TLUnityUIView.javaMask) } }
+            }
         case .gamemaker: started = husk_gamemaker_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
         case .flutter:
             // The screen's scale is the app's device pixel ratio, and the notch and home indicator its padding, in surface pixels.
@@ -551,6 +612,8 @@ final class TLUnityUIView: UIView, UIKeyInput {
             }
         }, { orientation in
             HuskLog.log("tl", "java: the app asks for orientation \(orientation)")
+            let o = Int32(orientation)
+            Task { @MainActor in TLUnityUIView.javaAsked(o) }
         })
         husk_java_set_document_picker { mimeTypes, multiple in
             let types = TLUnityUIView.contentTypes(mimeTypes.map { String(cString: $0) } ?? "*/*")
@@ -899,7 +962,9 @@ struct TLCocosAttemptView: View {
                                 .overlay(alignment: .center) { if editingPad { padEditor } }
                         }
                     }
-                    .ignoresSafeArea()
+                    // A Java app's screen begins below the notch, as an Android phone's below its status bar: an app drawn to the
+                    // top edge (a video at the top of a page) is not cut by it. Turned, the notch is at a side and the app has it all.
+                    .ignoresSafeArea(edges: engine == .java ? [.horizontal, .bottom] : .all)
                 }
             }
             if !uiHidden {
@@ -935,7 +1000,16 @@ struct TLCocosAttemptView: View {
         // Swipes near the edges are the game's.
         .huskDefersSystemGestures(on: .all)
         .onAppear {
-            HuskOrientation.set(portrait ? .portrait : .landscape)
+            if engine == .java, let apk = app.apks.first {
+                // a Java app turns as its manifest or settings allow, every way when neither says (as Android with auto-rotate)
+                let free = settings.orientation == .auto && husk_apk_orientation(apk) < 0
+                TLUnityUIView.javaDefaultMask = free ? HuskOrientation.standard : (portrait ? .portrait : .landscape)
+            }
+            if engine == .java, let apk = app.apks.first, TLUnityUIView.javaRunningApk == apk {
+                HuskOrientation.set(TLUnityUIView.javaMask)          // shown again: as it was left
+            } else {
+                HuskOrientation.set(portrait ? .portrait : .landscape)
+            }
             UIApplication.shared.isIdleTimerDisabled = settings.keepAwake
             if uiHidden { showHint() }
             CrashReport.gameStarted(app)
