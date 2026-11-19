@@ -50,6 +50,19 @@ public class SurfaceView extends View {
     }
     public SurfaceHolder getHolder() { return mHolder; }
     private volatile boolean mGL;
+    /** A video frame from husk.AvVideo (the iOS player): drawn straight in onDraw, scaled to fit (or fill) with black around it,
+     *  instead of through lockCanvas/post, which copied each frame three times. False while the surface does not exist. */
+    private volatile Bitmap mVideo;
+    private volatile boolean mVideoFill;
+    private final Paint mBlack = new Paint();
+    private final Rect mVideoDst = new Rect();
+    public boolean huskPostVideoFrame(Bitmap frame, boolean fill) {
+        if (!mCreated) return false;
+        mVideo = frame; mVideoFill = fill;
+        postInvalidate();
+        return true;
+    }
+    public void huskClearVideo() { mVideo = null; postInvalidate(); }
     /** The size an EGL window surface on this view gets: the fixed size, else the view's. */
     public int[] huskSurfaceSize() { int w = mSurfaceW > 0 ? mSurfaceW : getWidth(), h = mSurfaceH > 0 ? mSurfaceH : getHeight(); return new int[] { w > 0 ? w : husk.Native.screenWidth(), h > 0 ? h : husk.Native.screenHeight() }; }
     /** EGL draws on this view: it keeps its area clear for the frame under the window. */
@@ -93,6 +106,7 @@ public class SurfaceView extends View {
         if (!mCreated) return;
         for (SurfaceHolder.Callback c : callbacks()) c.surfaceDestroyed(mHolder);
         if (mGL) { mGL = false; husk.EGLNative.hide(); }
+        mVideo = null;
         synchronized (mLock) { mCreated = false; mHasFrame = false; mLock.notifyAll(); }
     }
     /** Software drawing: a canvas on the back buffer (kept from the last frame, as Android's is). */
@@ -135,6 +149,17 @@ public class SurfaceView extends View {
         super.draw(c);
     }
     @Override protected void onDraw(Canvas c) {
+        Bitmap v = mVideo;
+        if (v != null && !mGL) {
+            int w = getWidth(), h = getHeight(), vw = v.getWidth(), vh = v.getHeight();
+            float sc = mVideoFill ? Math.max((float) w / vw, (float) h / vh) : Math.min((float) w / vw, (float) h / vh);
+            int dw = Math.round(vw * sc), dh = Math.round(vh * sc);
+            mVideoDst.set((w - dw) / 2, (h - dh) / 2, (w + dw) / 2, (h + dh) / 2);
+            mBlack.setColor(0xFF000000);
+            c.drawRect(0, 0, w, h, mBlack);
+            c.drawBitmap(v, null, mVideoDst, mBlit);
+            return;
+        }
         synchronized (mLock) {
             if (mHasFrame && mFront != null && !mGL) {
                 if (mFront.getWidth() == getWidth() && mFront.getHeight() == getHeight()) c.drawBitmap(mFront, 0, 0, mBlit);

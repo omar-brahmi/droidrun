@@ -69,6 +69,9 @@ public final class AvVideo {
 
     private void loop() {
         Bitmap frame = null;
+        Bitmap[] pair = new Bitmap[2];          /* a SurfaceView's frames: one shown while the next is copied into the other */
+        int which = 0;
+        android.view.SurfaceView shownOn = null;
         Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
         Rect dst = new Rect();
         int lastState = 0, w0 = 0, h0 = 0;
@@ -90,12 +93,23 @@ public final class AvVideo {
             int w = vs >>> 16, ht = vs & 0xffff;
             if (w > 0 && ht > 0 && (w != w0 || ht != h0)) { w0 = w; h0 = ht; ev.onVideoSize(w, ht); }
             Surface s = target();
-            if (w > 0 && ht > 0 && s != null && s.isValid()) {
+            android.view.SurfaceView sv = s != null ? s.huskView : null;
+            if (sv != shownOn) { if (shownOn != null) shownOn.huskClearVideo(); shownOn = null; }
+            if (w > 0 && ht > 0 && sv != null) {
+                /* a SurfaceView: the frame goes to the view as it is, which draws it scaled once (no canvas, no buffer copies) */
+                Bitmap b = pair[which];
+                if (b == null || b.getWidth() != w || b.getHeight() != ht) b = pair[which] = Bitmap.createBitmap(w, ht, Bitmap.Config.ARGB_8888);
+                if (AvPlayer.nCopyFrame(x, b) && sv.huskPostVideoFrame(b, scaleToFill)) {
+                    shownOn = sv; which ^= 1;
+                    if (!first) { first = true; ev.onFirstFrame(); }
+                }
+            } else if (w > 0 && ht > 0 && s != null && s.isValid()) {
                 if (frame == null || frame.getWidth() != w || frame.getHeight() != ht) frame = Bitmap.createBitmap(w, ht, Bitmap.Config.ARGB_8888);
                 if (AvPlayer.nCopyFrame(x, frame) && draw(s, frame, dst, paint, w, ht) && !first) { first = true; ev.onFirstFrame(); }
             }
             try { Thread.sleep(8); } catch (InterruptedException e) { break; }
         }
+        if (shownOn != null) shownOn.huskClearVideo();
     }
 
     private boolean draw(Surface s, Bitmap frame, Rect dst, Paint paint, int w, int ht) {

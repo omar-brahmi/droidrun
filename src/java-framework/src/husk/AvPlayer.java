@@ -425,6 +425,9 @@ public final class AvPlayer implements InvocationHandler {
 
     private void renderLoop() {
         Bitmap frame = null;
+        Bitmap[] pair = new Bitmap[2];          /* a SurfaceView's frames: one shown while the next is copied into the other */
+        int which = 0;
+        SurfaceView shownOn = null;
         Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
         Rect dst = new Rect();
         long nextPoll = 0;
@@ -434,12 +437,20 @@ public final class AvPlayer implements InvocationHandler {
             int vs = h != 0 ? nVideoSize(h) : 0;
             int w = vs >>> 16, ht = vs & 0xffff;
             Surface s = target();
-            if (w > 0 && ht > 0 && s != null && s.isValid()) {
+            SurfaceView sv = s != null ? s.huskView : null;
+            if (sv != shownOn) { if (shownOn != null) shownOn.huskClearVideo(); shownOn = null; }
+            if (w > 0 && ht > 0 && sv != null) {
+                /* a SurfaceView: the frame goes to the view as it is, which draws it scaled once (no canvas, no buffer copies) */
+                Bitmap b = pair[which];
+                if (b == null || b.getWidth() != w || b.getHeight() != ht) b = pair[which] = Bitmap.createBitmap(w, ht, Bitmap.Config.ARGB_8888);
+                if (h != 0 && nCopyFrame(h, b) && sv.huskPostVideoFrame(b, false)) { shownOn = sv; which ^= 1; framed(w, ht); }
+            } else if (w > 0 && ht > 0 && s != null && s.isValid()) {
                 if (frame == null || frame.getWidth() != w || frame.getHeight() != ht) frame = Bitmap.createBitmap(w, ht, Bitmap.Config.ARGB_8888);
                 if (h != 0 && nCopyFrame(h, frame)) draw(s, frame, dst, paint, w, ht);
             }
             try { Thread.sleep(8); } catch (InterruptedException e) { break; }
         }
+        if (shownOn != null) shownOn.huskClearVideo();
     }
 
     private void draw(Surface s, Bitmap frame, Rect dst, Paint paint, int w, int ht) {
@@ -454,6 +465,11 @@ public final class AvPlayer implements InvocationHandler {
             c.drawColor(0xFF000000);
             c.drawBitmap(frame, null, dst, paint);
         } finally { s.unlockCanvasAndPost(c); }
+        framed(w, ht);
+    }
+
+    /* a frame is on screen: the first one, or one of a new size, tells the listeners */
+    private void framed(int w, int ht) {
         if (!firstFrame || w != videoW || ht != videoH) {
             boolean sized = w != videoW || ht != videoH;
             firstFrame = true; videoW = w; videoH = ht;
