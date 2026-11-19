@@ -108,8 +108,11 @@ jobs:
               echo "$(date +%s) $(ps -o rss= -p $PID 2>/dev/null) $(vmmap --summary $PID 2>/dev/null | awk '/TOTAL/{print $2; exit}')" >> out/memory-$mode.txt
               sleep 2
             done
-            wait $PID; echo "exit: $?" | tee -a $log
-            echo "== $mode: memory (time, RSS KiB, VM total)"; awk 'NR%5==1' out/memory-$mode.txt
+            rc=0; wait $PID || rc=$?                       # (a failing harness must not end the step: its log is what is wanted)
+            echo "exit: $rc" | tee -a $log
+            echo "== $mode: memory (time, RSS KiB, VM total)"; awk 'NR%5==1' out/memory-$mode.txt 2>/dev/null || true
+            # the collector's lines carry counts and times only, nothing of the app
+            echo "== $mode: gc"; grep -oE "gc: .*" $log | tail -15 || true
             if [ $own = 1 ]; then
               echo "== $mode: log tail"; tail -40 $log
               grep -E "Bench|Ops|dvmc:" $log || true
