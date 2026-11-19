@@ -177,83 +177,199 @@ static inline size_t okey_find(uintptr_t p)
     return SIZE_MAX;
 }
 
-static inline void mark_slot(size_t slot)
+/* Roots are found by several threads at once (scan_parallel); each keeps the objects it marks in a work list of its own, and the
+ * marks are taken with an atomic exchange, so an object goes into exactly one list. */
+typedef struct { uint32_t *work; size_t nwork, capwork, marked, words; } marker;
+
+static inline void mark_slot_in(marker *k, size_t slot)
 {
-    if (S.mark[slot]) return;
-    S.mark[slot] = 1; S.marked++;
-    if (S.nwork < S.capwork) S.work[S.nwork++] = (uint32_t)slot;
+    if (__atomic_load_n(&S.mark[slot], __ATOMIC_RELAXED)) return;
+    if (__atomic_exchange_n(&S.mark[slot], 1, __ATOMIC_RELAXED)) return;
+    k->marked++;
+    if (k->nwork < k->capwork) k->work[k->nwork++] = (uint32_t)slot;
     else S.mark[slot] = 2;                          /* the work list is full: traced in a later pass */
 }
 
-static inline void consider(uintptr_t w)
+static inline void consider_in(marker *k, uintptr_t w)
 {
     if (w < S.lo || w > S.hi || (w & 7)) {
         /* not an object, but it may be the start of an object's fields, array or text (JNI's Get*Elements hand those out) */
         if (w < S.olo || w > S.ohi) return;
     } else {
         size_t s = reg_find(w);
-        if (s != SIZE_MAX) { mark_slot(s); return; }
+        if (s != SIZE_MAX) { mark_slot_in(k, s); return; }
         if (w < S.olo || w > S.ohi) return;
     }
     size_t s = okey_find(w);
-    if (s != SIZE_MAX) mark_slot(s);
+    if (s != SIZE_MAX) mark_slot_in(k, s);
 }
 
-static void scan_words(uintptr_t lo, uintptr_t hi)
+static marker M0;                                   /* the collecting thread's: the registers and the trace */
+static inline void consider(uintptr_t w) { consider_in(&M0, w); }
+
+static void scan_words_in(marker *k, uintptr_t lo, uintptr_t hi)
 {
     lo = (lo + 7) & ~(uintptr_t)7;
-    for (uintptr_t p = lo; p + 8 <= hi; p += 8) consider(*(const uintptr_t *)p);
-    S.roots_words += (hi - lo) / 8;
+    for (uintptr_t p = lo; p + 8 <= hi; p += 8) consider_in(k, *(const uintptr_t *)p);
+    k->words += (hi - lo) / 8;
 }
+static inline void scan_words(uintptr_t lo, uintptr_t hi) { scan_words_in(&M0, lo, hi); }
 
 /* [lo, hi) less the owned blocks inside it */
-static void scan_range(uintptr_t lo, uintptr_t hi)
+static void scan_range_in(marker *k, uintptr_t lo, uintptr_t hi)
 {
     size_t a = 0, b = S.nown;
     while (a < b) { size_t m = (a + b) / 2; if (S.own[m].hi <= lo) a = m + 1; else b = m; }
     uintptr_t p = lo;
     for (size_t i = a; i < S.nown && S.own[i].lo < hi && p < hi; i++) {
-        if (S.own[i].lo > p) scan_words(p, S.own[i].lo < hi ? S.own[i].lo : hi);
+        if (S.own[i].lo > p) scan_words_in(k, p, S.own[i].lo < hi ? S.own[i].lo : hi);
         if (S.own[i].hi > p) p = S.own[i].hi;
     }
-    if (p < hi) scan_words(p, hi);
+    if (p < hi) scan_words_in(k, p, hi);
 }
 
-static void sort_own(void)
+/* LSD radix sort of the owned blocks by start, 16 bits a pass over the bits that differ (a heapsort of a few million blocks took
+ * longer than the rest of the pause). tmp: as many ranges, made before the world stopped; counts: 65536 entries. */
+static void sort_own(range *tmp, size_t *counts)
 {
-    /* heapsort: no allocation while the world is stopped */
     range *v = S.own; size_t n = S.nown;
-    for (size_t start = n / 2; start-- > 0; ) {
-        size_t root = start;
-        for (;;) { size_t c = 2 * root + 1; if (c >= n) break; if (c + 1 < n && v[c + 1].lo > v[c].lo) c++;
-                   if (v[root].lo >= v[c].lo) break; range t = v[root]; v[root] = v[c]; v[c] = t; root = c; }
+    uintptr_t lo = UINTPTR_MAX, hi = 0;
+    for (size_t i = 0; i < n; i++) { if (v[i].lo < lo) lo = v[i].lo; if (v[i].lo > hi) hi = v[i].lo; }
+    if (n < 2) return;
+    uintptr_t span = hi - lo;
+    range *src = v, *dst = tmp;
+    for (int shift = 0; shift < 64 && (span >> shift); shift += 16) {
+        memset(counts, 0, 65536 * sizeof(size_t));
+        for (size_t i = 0; i < n; i++) counts[((src[i].lo - lo) >> shift) & 0xffff]++;
+        size_t sum = 0;
+        for (size_t d = 0; d < 65536; d++) { size_t c = counts[d]; counts[d] = sum; sum += c; }
+        for (size_t i = 0; i < n; i++) dst[counts[((src[i].lo - lo) >> shift) & 0xffff]++] = src[i];
+        range *t = src; src = dst; dst = t;
     }
-    for (size_t end = n; end-- > 1; ) {
-        range t = v[0]; v[0] = v[end]; v[end] = t;
-        size_t root = 0;
-        for (;;) { size_t c = 2 * root + 1; if (c >= end) break; if (c + 1 < end && v[c + 1].lo > v[c].lo) c++;
-                   if (v[root].lo >= v[c].lo) break; range t2 = v[root]; v[root] = v[c]; v[c] = t2; root = c; }
-    }
+    if (src != v) memcpy(v, src, n * sizeof(range));
 }
 
 static void trace(void)
 {
     for (;;) {
-        while (S.nwork) {
-            jobj *o = (jobj *)g_tab[S.work[--S.nwork]];
+        while (M0.nwork) {
+            jobj *o = (jobj *)g_tab[M0.work[--M0.nwork]];
             if (o->fields) scan_words((uintptr_t)o->fields, (uintptr_t)(o->fields + o->nfields));
             if (o->kind == TL_K_OBJ_ARRAY && o->oarr.v) scan_words((uintptr_t)o->oarr.v, (uintptr_t)(o->oarr.v + o->oarr.len));
             consider((uintptr_t)o->native);                      /* an implementation's state may be another object */
         }
-        /* objects marked while the work list was full */
+        /* objects marked while a work list was full */
         bool more = false;
-        for (size_t i = 0; i < g_cap && S.nwork < S.capwork; i++) if (S.mark[i] == 2) { S.mark[i] = 1; S.work[S.nwork++] = (uint32_t)i; more = true; }
+        for (size_t i = 0; i < g_cap && M0.nwork < M0.capwork; i++) if (S.mark[i] == 2) { S.mark[i] = 1; M0.work[M0.nwork++] = (uint32_t)i; more = true; }
         if (!more) break;
     }
 }
 
-/* Every writable, resident (or paged-out) page of the process, less the collector's own memory, device memory and the shared cache. */
+/* ---- the roots, scanned by several threads: the pages to scan are listed first (runs), then each thread takes the next one */
+
+#define GC_WORKERS_MAX 8
+#define RUN_MAX_BYTES (1u << 20)                    /* a long run is cut, so the threads share it */
+typedef struct { uintptr_t lo, hi; } run;
+static struct {
+    run *runs; size_t nruns, caprun;
+    _Atomic size_t next;
+    bool overflow;                                  /* more runs than room: the collecting thread scans the rest alone */
+} R;
+
+static void scan_runs(marker *k)
+{
+    for (;;) {
+        size_t i = __atomic_fetch_add(&R.next, 1, __ATOMIC_RELAXED);
+        if (i >= R.nruns) break;
+        scan_range_in(k, R.runs[i].lo, R.runs[i].hi);
+    }
+}
+
+/* Worker threads, made once and waiting: they are left running when the world stops (they touch only the collector's state). */
+static struct {
+    int n;
+    pthread_t t[GC_WORKERS_MAX];
+    thread_t port[GC_WORKERS_MAX];
+    marker m[GC_WORKERS_MAX];
+    pthread_mutex_t mu; pthread_cond_t go, done;
+    unsigned round, finished;
+} W = { .mu = PTHREAD_MUTEX_INITIALIZER, .go = PTHREAD_COND_INITIALIZER, .done = PTHREAD_COND_INITIALIZER };
+
+static void *worker(void *arg)
+{
+    int me = (int)(intptr_t)arg;
+    unsigned seen = 0;
+    pthread_mutex_lock(&W.mu);
+    for (;;) {
+        while (W.round == seen) pthread_cond_wait(&W.go, &W.mu);
+        seen = W.round;
+        pthread_mutex_unlock(&W.mu);
+        scan_runs(&W.m[me]);
+        pthread_mutex_lock(&W.mu);
+        W.finished++;
+        pthread_cond_signal(&W.done);
+    }
+    return NULL;
+}
+
+static void workers_start(void)
+{
+    static bool started;
+    if (started) return;
+    started = true;
+    int want = 4;
+    const char *e = getenv("TL_GC_THREADS");
+    if (e) want = atoi(e);
+    int ncpu = (int)sysconf(_SC_NPROCESSORS_ONLN);
+    if (want > ncpu - 1) want = ncpu - 1;
+    if (want > GC_WORKERS_MAX) want = GC_WORKERS_MAX;
+    for (int i = 0; i < want; i++) {
+        if (pthread_create(&W.t[W.n], NULL, worker, (void *)(intptr_t)W.n)) break;
+        W.port[W.n] = pthread_mach_thread_np(W.t[W.n]);
+        W.n++;
+    }
+}
+
+static bool is_worker(thread_t t) { for (int i = 0; i < W.n; i++) if (W.port[i] == t) return true; return false; }
+
+/* Every writable, resident (or paged-out) page of the process, less the collector's own memory, device memory and the shared cache:
+ * listed as runs of pages, then scanned by the workers and this thread. */
+static void list_runs(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_t vecbytes);
 static void scan_memory(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_t vecbytes)
+{
+    R.nruns = 0; R.next = 0; R.overflow = false;
+    list_runs(cache_lo, cache_hi, vec, vecbytes);
+    pthread_mutex_lock(&W.mu);
+    W.finished = 0; W.round++;
+    pthread_cond_broadcast(&W.go);
+    pthread_mutex_unlock(&W.mu);
+    scan_runs(&M0);
+    pthread_mutex_lock(&W.mu);
+    while (W.finished < (unsigned)W.n) pthread_cond_wait(&W.done, &W.mu);
+    pthread_mutex_unlock(&W.mu);
+    /* what the workers marked, into this thread's work list for the trace */
+    for (int i = 0; i < W.n; i++) {
+        marker *k = &W.m[i];
+        for (size_t j = 0; j < k->nwork; j++) {
+            if (M0.nwork < M0.capwork) M0.work[M0.nwork++] = k->work[j];
+            else S.mark[k->work[j]] = 2;
+        }
+        M0.marked += k->marked; M0.words += k->words;
+        k->nwork = 0; k->marked = 0; k->words = 0;
+    }
+}
+
+/* a run of pages to scan; one that does not fit the list is scanned here, by this thread alone */
+static void add_run(uintptr_t lo, uintptr_t hi)
+{
+    for (uintptr_t p = lo; p < hi; p += RUN_MAX_BYTES) {
+        uintptr_t e = hi - p > RUN_MAX_BYTES ? p + RUN_MAX_BYTES : hi;
+        if (R.nruns < R.caprun) { R.runs[R.nruns].lo = p; R.runs[R.nruns].hi = e; R.nruns++; }
+        else { R.overflow = true; scan_range_in(&M0, p, e); }
+    }
+}
+
+static void list_runs(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_t vecbytes)
 {
     vm_address_t addr = 0;
     natural_t depth = 0;
@@ -278,7 +394,7 @@ static void scan_memory(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_
             for (size_t i = 0; i < chunk / page; ) {
                 if (!(vec[i] & (MINCORE_INCORE | MINCORE_PAGED_OUT))) { i++; continue; }
                 size_t j = i; while (j < chunk / page && (vec[j] & (MINCORE_INCORE | MINCORE_PAGED_OUT))) j++;
-                scan_range(c + i * page, c + j * page);
+                add_run(c + i * page, c + j * page);
                 i = j;
             }
             c += chunk;
@@ -316,23 +432,34 @@ static void collect(void)
 
     /* everything the collection needs, made before the world stops (nothing may allocate while it is stopped) */
     memset(&S, 0, sizeof(S));
+    workers_start();
     S.capown = g_count * 3 + 1024;
     S.ocap = 1; while (S.ocap < g_count * 4 + 1024) S.ocap <<= 1;
     S.capwork = g_count + 1024;
     const size_t vecbytes = 1 << 16;
     S.own = gc_map(S.capown * sizeof(range));
+    range *sort_tmp = gc_map(S.capown * sizeof(range));
+    size_t *sort_counts = gc_map(65536 * sizeof(size_t));
     S.okey = gc_map(S.ocap * sizeof(uintptr_t)); S.oval = gc_map(S.ocap * sizeof(uint32_t));
     S.mark = gc_map(g_cap);
-    S.work = gc_map(S.capwork * sizeof(uint32_t));
+    memset(&M0, 0, sizeof(M0));
+    M0.capwork = S.capwork; M0.work = gc_map(M0.capwork * sizeof(uint32_t));
+    bool workers_ok = true;
+    for (int i = 0; i < W.n; i++) {
+        memset(&W.m[i], 0, sizeof(W.m[i]));
+        W.m[i].capwork = S.capwork; W.m[i].work = gc_map(W.m[i].capwork * sizeof(uint32_t));
+        workers_ok &= W.m[i].work != NULL;
+    }
+    R.caprun = 1 << 20; R.runs = gc_map(R.caprun * sizeof(run));
     S.capstopped = 8192; S.stopped = gc_map(S.capstopped * sizeof(thread_t));
     char *vec = gc_map(vecbytes);
     size_t cache_len = 0; uintptr_t cache_lo = 0, cache_hi = 0;
     if (_dyld_get_shared_cache_range) { cache_lo = (uintptr_t)_dyld_get_shared_cache_range(&cache_len); cache_hi = cache_lo + cache_len; }
     thread_act_array_t threads = NULL; mach_msg_type_number_t nthreads = 0;
-    bool ok = S.own && S.okey && S.oval && S.mark && S.work && S.stopped && vec;
+    bool ok = S.own && sort_tmp && sort_counts && S.okey && S.oval && S.mark && M0.work && workers_ok && R.runs && S.stopped && vec;
 
     size_t before = g_count, freed = 0, freed_bytes = 0;
-    double t_stop = 0, t_mark = 0;
+    double t_stop = 0, t_mark = 0, t_tables = 0, t_roots = 0;
     if (ok) {
         /* stop the world: every thread but this one, again until no new one has started meanwhile */
         thread_t self = mach_thread_self();
@@ -341,7 +468,7 @@ static void collect(void)
             if (task_threads(mach_task_self(), &threads, &nthreads) != KERN_SUCCESS) { threads = NULL; nthreads = 0; break; }
             size_t added = 0;
             for (mach_msg_type_number_t i = 0; i < nthreads; i++) {
-                bool known = threads[i] == self;
+                bool known = threads[i] == self || is_worker(threads[i]);  /* the workers only touch the collector's memory */
                 for (size_t k = 0; k < S.nstopped && !known; k++) known = S.stopped[k] == threads[i];
                 if (known || S.nstopped >= S.capstopped) { mach_port_deallocate(mach_task_self(), threads[i]); continue; }
                 if (thread_suspend(threads[i]) == KERN_SUCCESS) { S.stopped[S.nstopped++] = threads[i]; added++; }
@@ -378,7 +505,8 @@ static void collect(void)
             default: break;
             }
         }
-        sort_own();
+        sort_own(sort_tmp, sort_counts);
+        t_tables = now_ms();
 
         /* the roots: the other threads' registers, then all of the process's own memory but the Java heap */
         for (size_t i = 0; i < S.nstopped; i++) {
@@ -390,6 +518,7 @@ static void collect(void)
         }
         __builtin_unwind_init();                                 /* this thread's callee-saved registers, onto its stack */
         scan_memory(cache_lo, cache_hi, vec, vecbytes);
+        t_roots = now_ms();
         trace();
         t_mark = now_ms();
 
@@ -418,20 +547,25 @@ static void collect(void)
             }
         }
     }
-    size_t marked = S.marked, roots_mb = S.roots_words * 8 >> 20;
+    size_t marked = M0.marked, roots_mb = M0.words * 8 >> 20;
     if (ok) { uint64_t d = (uint64_t)marked * 2; if (d < g_every) d = g_every; if (d > 3000000) d = 3000000; __atomic_store_n(&g_due, d, __ATOMIC_RELAXED); }
     if (S.own) munmap(S.own, S.capown * sizeof(range));
     if (S.okey) munmap(S.okey, S.ocap * sizeof(uintptr_t));
     if (S.oval) munmap(S.oval, S.ocap * sizeof(uint32_t));
     if (S.mark) munmap(S.mark, g_cap);
-    if (S.work) munmap(S.work, S.capwork * sizeof(uint32_t));
+    if (M0.work) munmap(M0.work, M0.capwork * sizeof(uint32_t));
+    for (int i = 0; i < W.n; i++) if (W.m[i].work) { munmap(W.m[i].work, W.m[i].capwork * sizeof(uint32_t)); W.m[i].work = NULL; }
+    if (R.runs) munmap(R.runs, R.caprun * sizeof(run));
+    if (sort_tmp) munmap(sort_tmp, S.capown * sizeof(range));
+    if (sort_counts) munmap(sort_counts, 65536 * sizeof(size_t));
     if (vec) munmap(vec, vecbytes);
     if (S.stopped) munmap(S.stopped, S.capstopped * sizeof(thread_t));
     pthread_mutex_unlock(&g_reg);
     pthread_mutex_unlock(&g_run);
     double t1 = now_ms();
     if (!ok) { tl_log_line("gc: could not collect (no memory for its tables, or no thread list)"); return; }
-    tl_log_line("gc: %zu threads stopped; %zu objects, %zu live, %zu %s (%zu MiB), %zu MiB of roots scanned; paused %.0f ms (mark %.0f), total %.0f ms",
-                S.nstopped, before, marked, freed, g_mode == 2 ? "freed" : "would be freed", freed_bytes >> 20, roots_mb,
-                t_mark - t_stop, t_mark - t_stop, t1 - t0);
+    tl_log_line("gc: %zu threads stopped; %zu objects, %zu live, %zu %s (%zu MiB), %zu MiB of roots scanned by %d threads; "
+                "paused %.0f ms (tables %.0f, roots %.0f, trace %.0f), total %.0f ms",
+                S.nstopped, before, marked, freed, g_mode == 2 ? "freed" : "would be freed", freed_bytes >> 20, roots_mb, W.n + 1,
+                t_mark - t_stop, t_tables - t_stop, t_roots - t_tables, t_mark - t_roots, t1 - t0);
 }
