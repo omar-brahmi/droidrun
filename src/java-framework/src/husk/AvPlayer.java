@@ -46,6 +46,12 @@ public final class AvPlayer implements InvocationHandler {
     static native boolean nPlaying(long h);
     static native int nVideoSize(long h);                    /* width << 16 | height */
     static native boolean nCopyFrame(long h, Bitmap dst);    /* a new frame, into dst (its size) */
+    /* the picture shown by iOS itself (an AVPlayerLayer under the screen) at a SurfaceView's place, in screen pixels: no frame
+     * is copied. nLayerSupported: whether this build shows video that way (the iPhone; a Mac harness with TL_VIDEO_LAYER=1). */
+    static native void nLayer(long h, int x, int y, int w, int ht, boolean visible, boolean fill);
+    static native boolean nLayerSupported();
+    static final boolean LAYER = layerSupported();
+    private static boolean layerSupported() { try { return nLayerSupported(); } catch (Throwable t) { return false; } }
     static native String nError(long h);
     static native void nVolume(long h, float v);
     static native void nRelease(long h);
@@ -427,7 +433,7 @@ public final class AvPlayer implements InvocationHandler {
         Bitmap frame = null;
         Bitmap[] pair = new Bitmap[2];          /* a SurfaceView's frames: one shown while the next is copied into the other */
         int which = 0;
-        SurfaceView shownOn = null;
+        SurfaceView shownOn = null, layerOn = null;
         Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
         Rect dst = new Rect();
         long nextPoll = 0;
@@ -439,6 +445,17 @@ public final class AvPlayer implements InvocationHandler {
             Surface s = target();
             SurfaceView sv = s != null ? s.huskView : null;
             if (sv != shownOn) { if (shownOn != null) shownOn.huskClearVideo(); shownOn = null; }
+            if (sv != layerOn && layerOn != null) { layerOn.huskSetVideoLayer(null); layerOn = null; }
+            if (sv != null && LAYER) {
+                /* iOS shows the picture itself, under the screen where the SurfaceView leaves a hole: nothing is copied */
+                if (layerOn == null) {
+                    sv.huskSetVideoLayer((x0, y0, w0, h0, vis) -> { long cur = h; if (cur != 0) nLayer(cur, x0, y0, w0, h0, vis, false); });
+                    layerOn = sv;
+                }
+                if (w > 0 && ht > 0) framed(w, ht);
+                try { Thread.sleep(30); } catch (InterruptedException e) { break; }
+                continue;
+            }
             if (w > 0 && ht > 0 && sv != null) {
                 /* a SurfaceView: the frame goes to the view as it is, which draws it scaled once (no canvas, no buffer copies) */
                 Bitmap b = pair[which];
@@ -451,6 +468,7 @@ public final class AvPlayer implements InvocationHandler {
             try { Thread.sleep(8); } catch (InterruptedException e) { break; }
         }
         if (shownOn != null) shownOn.huskClearVideo();
+        if (layerOn != null) layerOn.huskSetVideoLayer(null);
     }
 
     private void draw(Surface s, Bitmap frame, Rect dst, Paint paint, int w, int ht) {

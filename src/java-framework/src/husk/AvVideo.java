@@ -71,7 +71,7 @@ public final class AvVideo {
         Bitmap frame = null;
         Bitmap[] pair = new Bitmap[2];          /* a SurfaceView's frames: one shown while the next is copied into the other */
         int which = 0;
-        android.view.SurfaceView shownOn = null;
+        android.view.SurfaceView shownOn = null, layerOn = null;
         Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
         Rect dst = new Rect();
         int lastState = 0, w0 = 0, h0 = 0;
@@ -95,6 +95,17 @@ public final class AvVideo {
             Surface s = target();
             android.view.SurfaceView sv = s != null ? s.huskView : null;
             if (sv != shownOn) { if (shownOn != null) shownOn.huskClearVideo(); shownOn = null; }
+            if (sv != layerOn && layerOn != null) { layerOn.huskSetVideoLayer(null); layerOn = null; }
+            if (sv != null && AvPlayer.LAYER) {
+                /* iOS shows the picture itself, under the screen where the SurfaceView leaves a hole: nothing is copied */
+                if (layerOn == null) {
+                    sv.huskSetVideoLayer((lx, ly, lw, lh, vis) -> { long cur = h; if (cur != 0) AvPlayer.nLayer(cur, lx, ly, lw, lh, vis, scaleToFill); });
+                    layerOn = sv;
+                }
+                if (w > 0 && ht > 0 && !first) { first = true; ev.onFirstFrame(); }
+                try { Thread.sleep(30); } catch (InterruptedException e) { break; }
+                continue;
+            }
             if (w > 0 && ht > 0 && sv != null) {
                 /* a SurfaceView: the frame goes to the view as it is, which draws it scaled once (no canvas, no buffer copies) */
                 Bitmap b = pair[which];
@@ -110,6 +121,7 @@ public final class AvVideo {
             try { Thread.sleep(8); } catch (InterruptedException e) { break; }
         }
         if (shownOn != null) shownOn.huskClearVideo();
+        if (layerOn != null) layerOn.huskSetVideoLayer(null);
     }
 
     private boolean draw(Surface s, Bitmap frame, Rect dst, Paint paint, int w, int ht) {

@@ -9,6 +9,12 @@
 #import <Accelerate/Accelerate.h>
 #import <CoreVideo/CoreVideo.h>
 #import <QuartzCore/QuartzCore.h>
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE
+#import <UIKit/UIKit.h>
+#else
+#import <AppKit/AppKit.h>
+#endif
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -43,6 +49,8 @@ typedef struct {
     bool playing;               /* the app asked to play (nPlay), not to pause */
     void *src, *hdr;            /* NSURL, NSDictionary of what AVPlayer was given directly (retained), for that retry */
     char error[300];
+    void *view;                 /* HuskVideoView (retained; main thread): the picture shown by iOS itself, see nLayer */
+    bool shown;                 /* view on screen (main thread) */
 } avp;
 
 NSURL *tl_av_resolve(NSURL *src, NSDictionary *hdr, int *stream_id, NSString **why);
@@ -323,6 +331,101 @@ NAT(A_copyFrame)
     return true;
 }
 
+/* ---- the picture shown by iOS itself: an AVPlayerLayer in a view under the app's screen (the web views' container,
+ * husk-tl-dvm-web.m), at the place of the app's SurfaceView, which leaves a see-through hole there. The frames go from the decoder
+ * to the screen on the GPU: no copy, where nCopyFrame copies each one into a Bitmap the app's views draw. */
+void *tl_web_container(void);
+float tl_web_scale(void);
+void tl_web_video_shown(int delta);
+
+#if TARGET_OS_IPHONE
+@interface HuskVideoView : UIView
+@end
+@implementation HuskVideoView
++ (Class)layerClass { return AVPlayerLayer.class; }
+@end
+#define VLAYER(v) ((AVPlayerLayer *)(v).layer)
+#else
+@interface HuskVideoView : NSView
+@end
+@implementation HuskVideoView
+- (instancetype)initWithFrame:(NSRect)f { if ((self = [super initWithFrame:f])) { self.wantsLayer = YES; self.layer = [AVPlayerLayer layer]; } return self; }
+- (BOOL)isFlipped { return YES; }
+@end
+#define VLAYER(v) ((AVPlayerLayer *)(v).layer)
+#endif
+#define VIEW(p) ((__bridge HuskVideoView *)(p)->view)
+
+/* nLayerSupported(): whether videos show through layers. On the iPhone yes (TL_VIDEO_LAYER=0: no); on a Mac harness only with
+ * TL_VIDEO_LAYER=1, since its screenshots are the app's GL frames, which the layer is not in. */
+NAT(A_layerSupported)
+{
+    (void)self; (void)a;
+    const char *e = getenv("TL_VIDEO_LAYER");
+#if TARGET_OS_IPHONE
+    bool on = !e || strcmp(e, "0");
+#else
+    bool on = e && !strcmp(e, "1");
+#endif
+    *ret = Z(on);
+    return true;
+}
+
+/* nLayer(h, x, y, w, h, visible, fill): the player's picture at that place of the screen (pixels), fitted or filling */
+NAT(A_layer)
+{
+    (void)self; (void)ret;
+    avp *p = P;
+    if (!p) return true;
+    int x = a[1].i, y = a[2].i, w = a[3].i, h = a[4].i;
+    bool visible = a[5].z && w > 0 && h > 0, fill = a[6].z;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!p->player) return;                                        /* released meanwhile */
+        HuskVideoView *v = p->view ? VIEW(p) : nil;
+        if (!v && visible) {
+#if TARGET_OS_IPHONE
+            UIView *box = (__bridge UIView *)tl_web_container();
+#else
+            NSView *box = (__bridge NSView *)tl_web_container();
+#endif
+            if (!box) return;
+            v = [[HuskVideoView alloc] initWithFrame:CGRectZero];
+#if TARGET_OS_IPHONE
+            v.userInteractionEnabled = NO;                             /* the app's own controls above it take the touches */
+            v.backgroundColor = UIColor.blackColor;
+#endif
+            VLAYER(v).player = PLAYER(p);
+            [box addSubview:v];
+            p->view = (void *)CFBridgingRetain(v);
+#if !__has_feature(objc_arc)
+            [v release];
+#endif
+        }
+        if (!v) return;
+        float s = tl_web_scale();
+        v.frame = CGRectMake(x / s, y / s, w / s, h / s);
+        VLAYER(v).videoGravity = fill ? AVLayerVideoGravityResizeAspectFill : AVLayerVideoGravityResizeAspect;
+        v.hidden = !visible;
+        if (visible != p->shown) { p->shown = visible; tl_web_video_shown(visible ? 1 : -1); }
+    });
+    return true;
+}
+
+/* the view goes with the player (on the main thread, where the view is only ever touched) */
+static void drop_view(avp *p)
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        void *view = p->view;
+        p->view = NULL;
+        if (!view) return;
+        HuskVideoView *v = (__bridge HuskVideoView *)view;
+        VLAYER(v).player = nil;
+        [v removeFromSuperview];
+        if (p->shown) { p->shown = false; tl_web_video_shown(-1); }
+        CFRelease(view);
+    });
+}
+
 NAT(A_error)
 {
     (void)self;
@@ -337,6 +440,7 @@ NAT(A_release)
     avp *p = P;
     if (!p) return true;
     [PLAYER(p) pause];
+    drop_view(p);
     pthread_mutex_lock(&p->lock);
     [PLAYER(p) replaceCurrentItemWithPlayerItem:nil];
     drop_item(p);
@@ -386,6 +490,8 @@ static const struct { const char *name, *sig; dvm_native_fn fn; } k_avp[] = {
     { "nRelease", "(J)V", A_release },
     { "nBuildExo", "(Ljava/lang/Object;)Ljava/lang/Object;", A_buildExo },
     { "nClearKey", "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;)V", A_clearKey },
+    { "nLayer", "(JIIIIZZ)V", A_layer },
+    { "nLayerSupported", "()Z", A_layerSupported },
     { NULL, NULL, NULL },
 };
 

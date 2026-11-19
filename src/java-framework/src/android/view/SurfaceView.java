@@ -63,6 +63,33 @@ public class SurfaceView extends View {
         return true;
     }
     public void huskClearVideo() { mVideo = null; postInvalidate(); }
+
+    /** The video shown by iOS itself under the screen (husk.AvPlayer.nLayer): this view leaves a see-through hole and says where
+     *  it is, in screen pixels, whenever that changes (as WebView does for its page). */
+    public interface VideoLayer { void frame(int x, int y, int w, int h, boolean visible); }
+    private volatile VideoLayer mLayer;
+    private boolean mLayerVisible;
+    private int mLayerX, mLayerY, mLayerW, mLayerH;
+    public void huskSetVideoLayer(VideoLayer l) {
+        VideoLayer old = mLayer;
+        mLayer = l;
+        if (old != null && old != l) old.frame(0, 0, 0, 0, false);
+        mLayerVisible = false; mLayerW = -1;
+        post(this::updateLayer);
+        postInvalidate();
+    }
+    private void updateLayer() {
+        VideoLayer l = mLayer;
+        if (l == null) return;
+        boolean visible = isAttachedToWindow() && isShown() && getWindowVisibility() == VISIBLE && getWidth() > 0 && getHeight() > 0 && mCreated;
+        int[] loc = new int[2];
+        if (visible) getLocationOnScreen(loc);
+        if (visible == mLayerVisible && (!visible || (loc[0] == mLayerX && loc[1] == mLayerY && getWidth() == mLayerW && getHeight() == mLayerH))) return;
+        mLayerVisible = visible; mLayerX = loc[0]; mLayerY = loc[1]; mLayerW = getWidth(); mLayerH = getHeight();
+        l.frame(loc[0], loc[1], getWidth(), getHeight(), visible);
+    }
+    @Override protected void onScrollChanged(int l, int t, int ol, int ot) { super.onScrollChanged(l, t, ol, ot); updateLayer(); }
+    @Override protected void onVisibilityChanged(View changed, int v) { super.onVisibilityChanged(changed, v); updateLayer(); }
     /** The size an EGL window surface on this view gets: the fixed size, else the view's. */
     public int[] huskSurfaceSize() { int w = mSurfaceW > 0 ? mSurfaceW : getWidth(), h = mSurfaceH > 0 ? mSurfaceH : getHeight(); return new int[] { w > 0 ? w : husk.Native.screenWidth(), h > 0 ? h : husk.Native.screenHeight() }; }
     /** EGL draws on this view: it keeps its area clear for the frame under the window. */
@@ -85,6 +112,7 @@ public class SurfaceView extends View {
         super.layout(l, t, r, b);
         int w = mFixed ? mFixedW : r - l, h = mFixed ? mFixedH : b - t;
         if (w > 0 && h > 0 && (!mCreated || w != mSurfaceW || h != mSurfaceH)) post(this::sizeChanged);
+        if (mLayer != null) post(this::updateLayer);
     }
     @Override protected void onAttachedToWindow() { super.onAttachedToWindow(); if (getWidth() > 0 && getHeight() > 0) post(this::sizeChanged); }
     @Override protected void onDetachedFromWindow() { destroy(); super.onDetachedFromWindow(); }
@@ -98,6 +126,7 @@ public class SurfaceView extends View {
         if (!mCreated) { mCreated = true; created = true; android.util.Log.d("SurfaceView", getClass().getName() + ": surface created " + w + "x" + h + ", " + callbacks().size() + " callbacks"); for (SurfaceHolder.Callback c : callbacks()) c.surfaceCreated(mHolder); }
         if (created || w != mSurfaceW || h != mSurfaceH) {
             mSurfaceW = w; mSurfaceH = h;
+            updateLayer();
             for (SurfaceHolder.Callback c : callbacks()) c.surfaceChanged(mHolder, mFormat, w, h);
             for (SurfaceHolder.Callback c : callbacks()) if (c instanceof SurfaceHolder.Callback2) ((SurfaceHolder.Callback2) c).surfaceRedrawNeeded(mHolder);
         }
@@ -108,6 +137,7 @@ public class SurfaceView extends View {
         if (mGL) { mGL = false; husk.EGLNative.hide(); }
         mVideo = null;
         synchronized (mLock) { mCreated = false; mHasFrame = false; mLock.notifyAll(); }
+        updateLayer();
     }
     /** Software drawing: a canvas on the back buffer (kept from the last frame, as Android's is). */
     private Canvas lock(Rect dirty) {
@@ -149,6 +179,11 @@ public class SurfaceView extends View {
         super.draw(c);
     }
     @Override protected void onDraw(Canvas c) {
+        if (mLayer != null && !mGL) {                       /* iOS shows the video under the screen: a hole for it */
+            c.drawRect(0, 0, getWidth(), getHeight(), mClear);
+            updateLayer();
+            return;
+        }
         Bitmap v = mVideo;
         if (v != null && !mGL) {
             int w = getWidth(), h = getHeight(), vw = v.getWidth(), vh = v.getHeight();

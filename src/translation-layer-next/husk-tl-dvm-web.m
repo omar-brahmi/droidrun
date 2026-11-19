@@ -97,6 +97,20 @@ static void ensure_container(void)
 #endif
 }
 
+static void set_screen_opaque(bool opaque);
+static atomic_int g_visible_videos;         /* iOS video layers shown under the screen (husk-tl-dvm-avplayer.m) */
+static atomic_int g_visible_webs;
+
+/* For the video layers: the container the web views live in (made if need be; main thread), surface pixels per point, and a
+ * video layer shown or hidden (+1, -1): the screen is see-through while any web view or video is under it. */
+void *tl_web_container(void) { if (!g_container) ensure_container(); return (__bridge void *)g_container; }
+float tl_web_scale(void) { return g_scale; }
+void tl_web_video_shown(int delta)
+{
+    atomic_fetch_add(&g_visible_videos, delta);
+    set_screen_opaque(atomic_load(&g_visible_webs) + atomic_load(&g_visible_videos) == 0);
+}
+
 static void set_screen_opaque(bool opaque)
 {
 #if TARGET_OS_IPHONE
@@ -116,7 +130,6 @@ static void set_screen_opaque(bool opaque)
 static NSMutableDictionary<NSNumber *, HuskWeb *> *g_views;
 static NSMutableDictionary<NSNumber *, id> *g_pending;      /* call id -> completion block / scheme task */
 static int g_next_call = 1;
-static atomic_int g_visible_webs;
 
 /* ---- each Android app's own website data (cookies, storage), as Android keeps a WebView data directory per app: a data store of
  * its own where the system has them (iOS 17, macOS 14), the shared one before that. CookieManager reads and writes its cookies. */
@@ -435,7 +448,7 @@ NAT(W_destroy)
         HuskWeb *h = view_of(wid);
         [h teardown];
         [g_views removeObjectForKey:@(wid)];
-        if (atomic_load(&g_visible_webs) == 0) set_screen_opaque(true);
+        if (atomic_load(&g_visible_webs) + atomic_load(&g_visible_videos) == 0) set_screen_opaque(true);
     });
     return true;
 }
@@ -464,7 +477,7 @@ NAT(W_frame)
 #endif
         h.web.frame = r;
         h.web.hidden = !vis;
-        set_screen_opaque(atomic_load(&g_visible_webs) == 0);
+        set_screen_opaque(atomic_load(&g_visible_webs) + atomic_load(&g_visible_videos) == 0);
     });
     return true;
 }
@@ -784,7 +797,7 @@ void tl_web_attach(void *screen_view, void *container, float scale, bool fresh)
         g_container = box;
         g_screen = view;
         g_scale = s;
-        set_screen_opaque(atomic_load(&g_visible_webs) == 0);
+        set_screen_opaque(atomic_load(&g_visible_webs) + atomic_load(&g_visible_videos) == 0);
     };
     if ([NSThread isMainThread]) b(); else dispatch_sync(dispatch_get_main_queue(), b);
 }
@@ -801,7 +814,8 @@ bool tl_web_hit(float x, float y)
     return hit;
 }
 
-bool tl_web_any_visible(void) { return atomic_load(&g_visible_webs) > 0; }
+/* a web view or a video layer under the screen: the screen is cleared see-through where the app draws nothing */
+bool tl_web_any_visible(void) { return atomic_load(&g_visible_webs) + atomic_load(&g_visible_videos) > 0; }
 
 #if !TARGET_OS_IPHONE
 /* The harness: a run loop on the main thread for WebKit, taps as clicks, and the web views' pixels for screenshots. */
