@@ -1,0 +1,139 @@
+# Builds DroidRun.ipa: the official Husk 3.4 IPA as the base, with
+#   - this repository's executable (Swift app + translation layer: GC, AVPlayer bridge, ClearKey),
+#   - JIT-less dylibs made from Husk's Java runtime libraries and the native libraries of every APK in packager/input,
+#   - this repository's Java framework (packager/runtime/*.dex),
+#   - the home-screen name "DroidRun".
+# Output: the "DroidRun-ipa" artifact. Install it with Sideloadly.
+#
+# Manual start only (Actions > Build DroidRun IPA > Run workflow): macOS minutes count 10x on private repositories.
+name: Build DroidRun IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: "Name under the icon"
+        default: "DroidRun"
+
+env:
+  HUSK_REPO: Leviidev/Husk
+  # The official IPA this build is based on. Its resources (QEMU, ANGLE, MoltenVK, java-runtime) must match the
+  # source this repository forked from: commit 29abb51 = Husk 3.4 (build 149).
+  HUSK_RELEASE: "3.4"
+
+jobs:
+  executable:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick newest Xcode
+        run: |
+          X=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          sudo xcode-select -s "$X"
+          xcodebuild -version
+
+      - name: Fetch Husk IPA (prebuilt libraries to link against)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$HUSK_RELEASE" -R "$HUSK_REPO" -p Husk.ipa -D dl
+          unzip -q dl/Husk.ipa -d dl/ipa
+          mkdir -p build/ios-arm64/lib
+          cp dl/ipa/Payload/Husk.app/Frameworks/libqemu-aarch64-softmmu.dylib build/ios-arm64/lib/
+
+      - name: Build libhusk_rppairing.a (Rust)
+        run: |
+          rustup target add aarch64-apple-ios
+          bash scripts/build_rppairing_ios.sh
+
+      - name: Project for the executable only
+        run: |
+          brew install xcodegen >/dev/null
+          cd src/app
+          ruby -ryaml -e '
+            y = YAML.load_file("project.yml")
+            t = y["targets"]["Husk"]
+            t.delete("preBuildScripts"); t.delete("postBuildScripts")
+            t["dependencies"] = [
+              { "framework" => "../../build/ios-arm64/lib/libqemu-aarch64-softmmu.dylib", "embed" => false },
+              { "framework" => "Frameworks/libFilePickerFix.dylib", "embed" => false } ]
+            File.write("project.yml", y.to_yaml)'
+          xcodegen generate --quiet
+
+      - name: Build
+        run: |
+          cd src/app
+          set -o pipefail
+          xcodebuild -project Husk.xcodeproj -target Husk -sdk iphoneos -configuration Release \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build 2>&1 | tee build.log \
+            | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" build.log || { grep -E "error:" build.log | head -40; exit 1; }
+          mkdir -p "$GITHUB_WORKSPACE/out" && cp build/Release-iphoneos/Husk.app/Husk "$GITHUB_WORKSPACE/out/Husk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: executable
+          path: out/Husk
+          retention-days: 7
+
+  dylibs:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build converter (elf2macho-test)
+        run: |
+          bash tools/regress/build.sh tools/elf2macho-test.c "$GITHUB_WORKSPACE/elf2macho-test" 2>&1 | grep -E "error|warning: implicit" || true
+          test -x "$GITHUB_WORKSPACE/elf2macho-test"
+
+      - name: Fetch Husk IPA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$HUSK_RELEASE" -R "$HUSK_REPO" -p Husk.ipa -D dl
+
+      - name: Collect libraries
+        run: python3 packager/collect.py dl/Husk.ipa packager/input libs
+
+      - name: Convert
+        run: |
+          mkdir -p out
+          fail=0
+          while IFS= read -r so; do
+            if ./elf2macho-test "$so" out/ --ios; then :; else echo "::warning::failed: $so"; fail=$((fail+1)); fi
+          done < <(find libs -name '*.so' | sort)
+          echo "converted: $(ls out | wc -l), failed: $fail"
+          test "$(ls out | wc -l)" -gt 0
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dylibs
+          path: out/*.dylib
+          retention-days: 7
+
+  ipa:
+    needs: [executable, dylibs]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+
+      - name: Fetch Husk IPA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$HUSK_RELEASE" -R "$HUSK_REPO" -p Husk.ipa -D dl
+
+      - name: Pack
+        run: |
+          python3 packager/pack.py dl/Husk.ipa art/dylibs DroidRun.ipa \
+            --exe art/executable/Husk --runtime packager/runtime --name "${{ inputs.name }}" | grep -v "^  +"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DroidRun-ipa
+          path: DroidRun.ipa
+          compression-level: 0
+          retention-days: 30

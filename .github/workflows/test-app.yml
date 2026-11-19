@@ -1,0 +1,122 @@
+# Runs an APK from packager/input/ on a GitHub macOS runner with the Mac harness (tools/javaapp-test.c) built from this repository:
+# the bench for engine changes (the garbage collector) before they reach a phone. Output: the log, the memory curve (RSS every
+# 2 s) and a screenshot, as the "app-test" artifact.
+name: Test app on Mac
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk:
+        description: "APK in packager/input/"
+        default: "MajedSportPhoneV1.2.apk"
+      package:
+        description: "Package name"
+        default: "com.majed.player.app"
+      seconds:
+        description: "How long to run"
+        default: "90"
+      env:
+        description: "Extra environment (KEY=VALUE KEY2=VALUE2)"
+        default: ""
+      script:
+        description: "Harness control lines, ; between (tap X Y, wait MS, shot PNG)"
+        default: "wait 25000;tap 428 459;wait 20000;shot shot-channels.png;wait 30000"
+
+env:
+  HUSK_REPO: Leviidev/Husk
+  HUSK_RELEASE: "3.4"
+
+jobs:
+  run:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build harness (javaapp-test)
+        run: |
+          bash tools/regress/build.sh tools/javaapp-test.c "$GITHUB_WORKSPACE/javaapp-test" 2>&1 | grep -E "error" || true
+          test -x "$GITHUB_WORKSPACE/javaapp-test"
+
+      - name: Java runtime from the Husk IPA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$HUSK_RELEASE" -R "$HUSK_REPO" -p Husk.ipa -D dl
+          unzip -q dl/Husk.ipa 'Payload/Husk.app/java-runtime/*' 'Payload/Husk.app/android-system/*' -d dl/ipa
+          JR="$GITHUB_WORKSPACE/dl/ipa/Payload/Husk.app/java-runtime"
+          cp packager/runtime/husk-framework.dex packager/runtime/husk-framework-core.dex "$JR/"
+          # the harness reads the trusted roots from the conscrypt module; the app ships them in android-system
+          cp -R dl/ipa/Payload/Husk.app/android-system/cacerts "$JR/com.android.conscrypt/cacerts"
+          # the harness reads org.apache.http.legacy.jar from its author's drive
+          sudo mkdir -p /Volumes/GTAV/husk2/modules/jars
+          sudo cp "$JR/org.apache.http.legacy.jar" /Volumes/GTAV/husk2/modules/jars/
+          # ANGLE (EGL/GLES over Metal) for macOS: from an installed Chromium browser, else Chrome's headless shell
+          EGL=$(find /Applications -name libEGL.dylib 2>/dev/null | grep -v SwiftShader | head -1)
+          if [ -z "$EGL" ]; then
+            (cd "$RUNNER_TEMP" && npx -y @puppeteer/browsers install chrome-headless-shell@stable >/dev/null)
+            EGL=$(find "$RUNNER_TEMP/chrome-headless-shell" -name libEGL.dylib | head -1)
+          fi
+          GLES=$(dirname "$EGL")/libGLESv2.dylib
+          echo "ANGLE: $EGL"
+          test -f "$EGL"
+          test -f "$GLES"
+          {
+            echo "TL_ART=$JR/com.android.art"
+            echo "TL_FRAMEWORK=$JR/husk-framework.dex"
+            echo "TL_FRAMEWORK_CORE=$JR/husk-framework-core.dex"
+            echo "TL_FRAMEWORK_RES=$JR/framework-res.apk"
+            echo "TL_SYSFONTS=$GITHUB_WORKSPACE/dl/ipa/Payload/Husk.app/android-system"
+            echo "TL_ANGLE_EGL=$EGL"
+            echo "TL_ANGLE_GLES=$GLES"
+            echo "DYLD_LIBRARY_PATH=$(dirname "$EGL")"
+            echo "TL_TMP=$RUNNER_TEMP"
+            echo "TL_PACKAGE=${{ inputs.package }}"
+          } >> "$GITHUB_ENV"
+
+      - name: Test streams (for packager/input/AvTest.apk)
+        if: inputs.apk == 'AvTest.apk'
+        run: |
+          brew install ffmpeg >/dev/null 2>&1 || true
+          mkdir -p media/dash media/hls
+          ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=640x360:rate=25 -f lavfi -i sine=frequency=440 -t 60 \
+            -c:v libx264 -pix_fmt yuv420p -g 50 -c:a aac -shortest media/clip.mp4
+          ffmpeg -hide_banner -loglevel error -i media/clip.mp4 -c copy -f mpegts media/live.ts
+          ffmpeg -hide_banner -loglevel error -i media/clip.mp4 -c copy -f dash -seg_duration 2 -use_template 1 -use_timeline 1 media/dash/stream.mpd
+          ffmpeg -hide_banner -loglevel error -i media/clip.mp4 -c copy -f hls -hls_time 2 -hls_playlist_type vod media/hls/index.m3u8
+          # ClearKey-encrypted DASH, 'cenc' and 'cbcs' (KID a1b2..8f90, key 0011..eeff: the key AvTest hands Husk)
+          brew install bento4 >/dev/null 2>&1 || true
+          mp4fragment --fragment-duration 2000 media/clip.mp4 media/frag.mp4
+          for sc in cenc cbcs; do
+            mp4dash --force -o media/$sc --encryption-cenc-scheme=$sc --encryption-key=a1b2c3d4e5f60718293a4b5c6d7e8f90:00112233445566778899aabbccddeeff media/frag.mp4 >/dev/null
+            grep -c ContentProtection media/$sc/stream.mpd || true
+          done
+          ls -la media media/dash media/hls | head -30
+          (cd media && nohup python3 -m http.server 8765 > ../http.log 2>&1 &)
+          sleep 2; curl -sI http://127.0.0.1:8765/live.ts | head -3
+
+      - name: Run
+        run: |
+          mkdir -p out
+          echo "${{ inputs.script }}" | tr ';' '\n' | sed "s#^shot #shot $GITHUB_WORKSPACE/out/#" > ctl.txt
+          echo "shot $GITHUB_WORKSPACE/out/shot-end.png" >> ctl.txt
+          cat ctl.txt
+          export TL_CTL="$GITHUB_WORKSPACE/ctl.txt"
+          for kv in ${{ inputs.env }}; do export "$kv"; done
+          ./javaapp-test "packager/input/${{ inputs.apk }}" ${{ inputs.seconds }} 856 1852 > out/app.log 2>&1 &
+          PID=$!
+          while kill -0 $PID 2>/dev/null; do
+            echo "$(date +%s) $(ps -o rss= -p $PID 2>/dev/null) $(vmmap --summary $PID 2>/dev/null | awk '/TOTAL/{print $2; exit}')" >> out/memory.txt
+            sleep 2
+          done
+          wait $PID; echo "exit: $?" | tee -a out/app.log
+          echo "== memory (time, RSS KiB, VM total)"; cat out/memory.txt | awk 'NR%5==1'
+          echo "== log tail"; tail -40 out/app.log
+          grep -cE "FATAL|CRASH" out/app.log || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app-test
+          path: out/
+          retention-days: 14

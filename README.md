@@ -1,3 +1,19 @@
+# DroidRun
+
+DroidRun runs Android apps on an iPhone without JIT. It is a fork of [Husk](https://github.com/Leviidev/Husk) by Leviidev,
+licensed under the GNU GPL v2 (see `LICENSE`), forked at commit `29abb51` (Husk 3.4, build 149).
+
+Changes in this fork:
+
+- Android native libraries are converted to iOS dylibs before install, so no JIT is needed (`packager/`).
+- A garbage collector for the Dalvik VM (`src/translation-layer-next/husk-tl-gc.c`).
+- Video from ExoPlayer, MediaPlayer and VideoView plays through iOS AVPlayer, including MPEG-TS, DASH and
+  ClearKey-encrypted DASH (`husk-tl-dvm-avplayer.m`, `husk-tl-dvm-avstream.m`, `src/java-framework/src/husk/AvPlayer.java`).
+
+Build the IPA: see [packager/README.md](packager/README.md). The upstream README follows.
+
+---
+
 <p align="center">
   <img src="src/app/Husk/Assets.xcassets/AppIcon.appiconset/Icon-Default.png" width="120" height="120" alt="Husk">
 </p>

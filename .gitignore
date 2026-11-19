@@ -29,3 +29,8 @@ third_party/gpu/
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# packager outputs (workflow artifacts unpacked on the PC)
+packager/dylibs/
+packager/exe/
+__pycache__/
