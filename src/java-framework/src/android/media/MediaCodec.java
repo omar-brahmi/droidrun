@@ -60,6 +60,12 @@ public final class MediaCodec {
     private MediaFormat mInputFormat, mOutputFormat;
     private ByteBuffer[] mInputs;
     private final ArrayDeque<Integer> mFreeInputs = new ArrayDeque<>();
+    /* A video decoder decodes as fast as it is fed, and the player takes a frame only when it is due: input slots are held back
+       while this many decoded frames wait (a 1080p frame is 8 MB), as a hardware decoder runs out of output buffers. Unbounded,
+       a stream decoding ahead of the picture used hundreds of MB in seconds and iOS ended the app. */
+    private static final int MAX_WAITING_FRAMES = 4;
+    private final ArrayDeque<Integer> mHeldInputs = new ArrayDeque<>();
+    private int mWaitingFrames;
     private final ArrayDeque<Out> mQueue = new ArrayDeque<>();
     private Out[] mSlots = new Out[16];
     private boolean mFormatPending, mStartPending;
@@ -142,7 +148,7 @@ public final class MediaCodec {
             if (mState == ST_UNINITIALIZED || mState == ST_RELEASED) throw new IllegalStateException("start in state " + mState);
             boolean fresh = mState == ST_CONFIGURED;
             mState = ST_RUNNING;
-            if (fresh) { mFreeInputs.clear(); for (int i = 0; i < INPUTS; i++) mFreeInputs.add(i); }
+            if (fresh) { mFreeInputs.clear(); mHeldInputs.clear(); mWaitingFrames = 0; for (int i = 0; i < INPUTS; i++) mFreeInputs.add(i); }
             else if (!mStartPending) return;
             mStartPending = false;
             if (mCallback == null) return;
@@ -176,8 +182,13 @@ public final class MediaCodec {
         if (size > 0) { ByteBuffer d = mInputs[index].duplicate(); d.clear(); d.position(offset); d.get(data, 0, size); }
         decode(data, size, ptsUs, flags);
         int gen;
-        synchronized (mLock) { mFreeInputs.add(index); mLock.notifyAll(); gen = mGeneration; }
-        if (mCallback != null) postInput(gen, index);
+        boolean held;
+        synchronized (mLock) {
+            held = mVideo && mWaitingFrames >= MAX_WAITING_FRAMES;
+            if (held) mHeldInputs.add(index); else { mFreeInputs.add(index); mLock.notifyAll(); }
+            gen = mGeneration;
+        }
+        if (mCallback != null && !held) postInput(gen, index);
     }
     public void queueSecureInputBuffer(int index, int offset, CryptoInfo info, long ptsUs, int flags) {
         int size = 0;
@@ -199,8 +210,13 @@ public final class MediaCodec {
         if (!ok) throw new CryptoException(CryptoException.ERROR_NO_KEY, mCrypto == null ? "no MediaCrypto: protected media without DRM" : "ClearKey: no key for this sample");
         decode(data, size, ptsUs, flags);
         int gen;
-        synchronized (mLock) { mFreeInputs.add(index); mLock.notifyAll(); gen = mGeneration; }
-        if (mCallback != null) postInput(gen, index);
+        boolean held;
+        synchronized (mLock) {
+            held = mVideo && mWaitingFrames >= MAX_WAITING_FRAMES;
+            if (held) mHeldInputs.add(index); else { mFreeInputs.add(index); mLock.notifyAll(); }
+            gen = mGeneration;
+        }
+        if (mCallback != null && !held) postInput(gen, index);
     }
     public void queueInputBuffers(int index, ArrayDeque infos) {
         for (Object o : infos) { BufferInfo b = (BufferInfo) o; queueInputBuffer(index, b.offset, b.size, b.presentationTimeUs, b.flags); }
@@ -241,6 +257,7 @@ public final class MediaCodec {
             int i = 0; while (i < mSlots.length && mSlots[i] != null) i++;
             if (i == mSlots.length) mSlots = java.util.Arrays.copyOf(mSlots, mSlots.length * 2);
             o.index = i; mSlots[i] = o;
+            if (o.frame != 0) mWaitingFrames++;
             if (formatChanged && mCallback == null) mFormatPending = true;
             if (mCallback == null) { mQueue.add(o); mLock.notifyAll(); return; }
             gen = mGeneration; fmt = mOutputFormat;
@@ -293,12 +310,26 @@ public final class MediaCodec {
             if (mState != ST_RUNNING) throw new IllegalStateException("releaseOutputBuffer when not executing");
             if (index < 0 || index >= mSlots.length || mSlots[index] == null) throw new IllegalStateException("output buffer " + index + " is not dequeued");
             o = mSlots[index]; mSlots[index] = null;
+            if (o.frame != 0) mWaitingFrames--;
         }
+        if (o.frame != 0) giveBackInputs();
         if (o.frame == 0) return;
         if (TRACE && !render) mSkipped++;
         long t0 = TRACE ? System.nanoTime() : 0;
         try { if (render) draw(o); } finally { husk.MediaCodecNative.freeFrame(o.frame); }
         if (TRACE && render) mDrawNs += System.nanoTime() - t0;
+    }
+    /** A decoded frame was taken: the input slots held back go back to the player while frames are few enough again. */
+    private void giveBackInputs() {
+        java.util.ArrayList<Integer> back = new java.util.ArrayList<>();
+        int gen;
+        synchronized (mLock) {
+            while (!mHeldInputs.isEmpty() && mWaitingFrames < MAX_WAITING_FRAMES) back.add(mHeldInputs.poll());
+            if (back.isEmpty()) return;
+            mFreeInputs.addAll(back); mLock.notifyAll();
+            gen = mGeneration;
+        }
+        if (mCallback != null) for (Integer i : back) postInput(gen, i);
     }
     private static final boolean TRACE = System.getenv("TL_MEDIA_TRACE") != null;
     private int mDrawn, mSkipped;
@@ -334,6 +365,7 @@ public final class MediaCodec {
         java.util.ArrayList<Out> drop = new java.util.ArrayList<>();
         synchronized (mLock) {
             for (int i = 0; i < mSlots.length; i++) if (mSlots[i] != null) { drop.add(mSlots[i]); mSlots[i] = null; }
+            mWaitingFrames = 0; mHeldInputs.clear();
             mQueue.clear();
         }
         for (Out o : drop) if (o.frame != 0) husk.MediaCodecNative.freeFrame(o.frame);

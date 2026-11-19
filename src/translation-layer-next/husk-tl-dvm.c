@@ -636,12 +636,14 @@ jvalue *dvm_slots(jobj *o)
     uint32_t n = c ? c->nslots : 0;
     if (!n) n = 1;
     jvalue *f = calloc(n, sizeof(jvalue));
+    /* a Class mirror's fields are filled before any thread can see them: published empty and filled after, another thread read
+       a null componentType in between (Arrays.copyOf of an ExoPlayer TrackOutput[] threw NullPointerException) */
+    if (o->kind == TL_K_CLASS) { void dvm_fill_mirror_into(jobj *mirror, jvalue *s, uint32_t n); dvm_fill_mirror_into(o, f, n); }
     pthread_mutex_lock(&g_lock);
     bool mine = !o->fields;
-    if (mine) { __atomic_store_n(&o->fields, f, __ATOMIC_RELEASE); __atomic_store_n(&o->nfields, n, __ATOMIC_RELEASE); f = NULL; }
+    if (mine) { __atomic_store_n(&o->nfields, n, __ATOMIC_RELEASE); __atomic_store_n(&o->fields, f, __ATOMIC_RELEASE); f = NULL; }
     pthread_mutex_unlock(&g_lock);
     free(f);
-    if (mine && o->kind == TL_K_CLASS) { void dvm_fill_mirror(jobj *mirror); dvm_fill_mirror(o); }
     return o->fields;
 }
 
@@ -2480,17 +2482,18 @@ static dvm_field *class_loader_field(void)
     if (!f) { dvm_class *cc = dvm_class_of(g_class_class); f = cc ? dvm_find_field(cc, "classLoader", false) : NULL; }
     return f;
 }
-void dvm_mirror_loader(jobj *mirror);
-void dvm_mirror_loader(jobj *mirror)
+/* the mirror's classLoader field, in its slots s (n of them: the mirror's own, or ones being filled before they are its) */
+void dvm_mirror_loader_into(jobj *mirror, jvalue *s, uint32_t n);
+void dvm_mirror_loader_into(jobj *mirror, jvalue *s, uint32_t n)
 {
     dvm_class *c = (dvm_class *)mirror->klass.jc->dvm;
     jobj *rt = c && c->dex && c->dex->ns ? c->dex->loader : NULL;
     dvm_field *f = g_app_loader || rt ? class_loader_field() : NULL;
-    if (!f || !mirror->fields || f->slot >= mirror->nfields || mirror->fields[f->slot].l) return;
-    if (rt) mirror->fields[f->slot].l = rt;
-    else if (from_app(c)) mirror->fields[f->slot].l = g_app_loader;
+    if (!f || !s || f->slot >= n || s[f->slot].l) return;
+    if (rt) s[f->slot].l = rt;
+    else if (from_app(c)) s[f->slot].l = g_app_loader;
 }
-static void loader_for(tl_jclass *jc) { if (jc->mirror && jc->mirror->fields) dvm_mirror_loader(jc->mirror); }
+static void loader_for(tl_jclass *jc) { if (jc->mirror && jc->mirror->fields) dvm_mirror_loader_into(jc->mirror, jc->mirror->fields, jc->mirror->nfields); }
 void dvm_set_app_loader(jobj *loader);
 void dvm_set_app_loader(jobj *loader)
 {

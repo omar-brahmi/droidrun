@@ -894,14 +894,13 @@ static int prim_code(char p)
 }
 
 /* What a Class mirror's fields hold, filled when the interpreter first looks inside one. */
-void dvm_fill_mirror(jobj *mirror);
-void dvm_fill_mirror(jobj *mirror)
+void dvm_fill_mirror_into(jobj *mirror, jvalue *s, uint32_t nslots);
+void dvm_fill_mirror_into(jobj *mirror, jvalue *s, uint32_t nslots)
 {
     tl_jclass *jc = mirror->klass.jc;
     dvm_class *cc = dvm_class_of(tl_jni_class("java/lang/Class"));
     dvm_class *c = dvm_class_of(jc);
     if (!cc) return;
-    jvalue *s = mirror->fields;
     dvm_field *f;
     uint32_t flags = c ? c->flags : 1;
     if (!c) flags = !strncmp(jc->name, "android/", 8) ? 1 : 1;
@@ -925,7 +924,7 @@ void dvm_fill_mirror(jobj *mirror)
         s[f->slot] = L(ec->mirror);
     }
     if ((f = dvm_find_field(cc, "status", false))) s[f->slot] = I(c && c->state == CS_INITIALIZED ? 0x0F : 0x0A);
-    { void dvm_mirror_loader(jobj *); dvm_mirror_loader(mirror); }
+    { void dvm_mirror_loader_into(jobj *, jvalue *, uint32_t); dvm_mirror_loader_into(mirror, s, nslots); }
     /* ifTable: every interface the class implements, its superclasses' and super-interfaces' included, as (interface, methods)
      * pairs -- what isAssignableFrom, getMethods and instanceof-by-reflection read */
     if ((f = dvm_find_field(cc, "ifTable", false))) {

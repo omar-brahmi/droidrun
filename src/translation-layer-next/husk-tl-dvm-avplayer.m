@@ -222,6 +222,35 @@ NAT(A_buffered)
 /* 1 idle, 2 buffering, 3 ready, 4 ended, -1 failed */
 static void relink_view(avp *p);
 
+/* What a failure was, for the app, written before its message: "http: 404 " when the server answered with an error status, "net: "
+ * when it could not be reached, nothing when AVPlayer could not play what it got. The first two are the app's to handle -- PrimeTV
+ * goes to its next server -- as ExoPlayer reports them; only the last is a stream for the app's own ExoPlayer. */
+static void net_failure(NSError *e, char *out, size_t n)
+{
+    out[0] = 0;
+    for (int depth = 0; e && depth < 6; depth++, e = e.userInfo[NSUnderlyingErrorKey]) {
+        if ([e.domain isEqualToString:@"CoreMediaErrorDomain"] && (e.code == -12938 || e.code == -12939 || e.code == -12940)) {
+            NSString *d = e.userInfo[@"NSDescription"] ?: e.localizedDescription;      /* "HTTP 404: File Not Found" */
+            int status = 0;
+            if (d) sscanf(d.UTF8String, "HTTP %d", &status);
+            snprintf(out, n, "http: %d ", status);
+            return;
+        }
+        if ([e.domain isEqualToString:NSURLErrorDomain]) {
+            switch (e.code) {
+            case NSURLErrorFileDoesNotExist: snprintf(out, n, "http: 404 "); return;
+            case NSURLErrorNoPermissionsToReadFile: snprintf(out, n, "http: 403 "); return;
+            case NSURLErrorUserAuthenticationRequired: snprintf(out, n, "http: 401 "); return;
+            case NSURLErrorBadServerResponse: case NSURLErrorResourceUnavailable: snprintf(out, n, "http: 0 "); return;
+            case NSURLErrorTimedOut: case NSURLErrorCannotFindHost: case NSURLErrorCannotConnectToHost: case NSURLErrorNetworkConnectionLost:
+            case NSURLErrorDNSLookupFailed: case NSURLErrorNotConnectedToInternet: case NSURLErrorSecureConnectionFailed:
+            case NSURLErrorServerCertificateUntrusted: case NSURLErrorServerCertificateHasBadDate: snprintf(out, n, "net: "); return;
+            default: break;
+            }
+        }
+    }
+}
+
 NAT(A_state)
 {
     (void)self;
@@ -264,7 +293,9 @@ NAT(A_state)
         }
         else if (it.status == AVPlayerItemStatusFailed || pl.status == AVPlayerStatusFailed) {
             NSError *e = it.error ? it.error : pl.error;
-            snprintf(p->error, sizeof(p->error), "%s", e ? e.localizedDescription.UTF8String : "AVPlayer failed");
+            char kind[32];
+            net_failure(e, kind, sizeof(kind));
+            snprintf(p->error, sizeof(p->error), "%s%s", kind, e ? e.localizedDescription.UTF8String : "AVPlayer failed");
             tl_log_line("avplayer: failed: %s (%s)", p->error, e ? e.description.UTF8String : "");
             s = -1;
         } else if (it.status != AVPlayerItemStatusReadyToPlay) s = 2;

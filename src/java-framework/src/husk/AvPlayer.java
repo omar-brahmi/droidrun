@@ -298,6 +298,7 @@ public final class AvPlayer implements InvocationHandler {
         if (released) return;
         if (url == null) { fallBackToExo("no URL in the media item"); return; }
         if (!clearKey()) return;
+        playerError = null;
         if (h == 0) h = nCreate();
         nVolume(h, volume);
         nSetSource(h, url, headers);
@@ -387,10 +388,11 @@ public final class AvPlayer implements InvocationHandler {
         listeners.clear();
     }
 
-    private void fail(String why) {
-        android.util.Log.w(TAG, "playback failed: " + why);
+    private void fail(String why) { fail(why, 1000 /* ERROR_CODE_UNSPECIFIED */, null); }
+    private void fail(String why, int code, Throwable cause) {
+        android.util.Log.w(TAG, "playback failed: " + why + " (error code " + code + ")");
         playerError = newInstance(c("PlaybackException"), new Class<?>[] { String.class, Throwable.class, int.class },
-                                  why, null, 1000 /* ERROR_CODE_UNSPECIFIED */);
+                                  why, cause, code);
         Object e = playerError;
         setState(1);
         post(() -> {
@@ -506,7 +508,23 @@ public final class AvPlayer implements InvocationHandler {
     private void poll() {
         if (h == 0 || !prepared) return;
         int s = nState(h);
-        if (s < 0) { prepared = false; fallBackToExo(nError(h)); return; }
+        if (s < 0) {
+            prepared = false;
+            String why = nError(h);
+            /* the server said no (404, 403) or could not be reached: the app's to handle, as ExoPlayer reports it (PrimeTV goes to its
+               next server and sets a new item, which AVPlayer plays). Only a stream AVPlayer cannot play goes to the app's ExoPlayer. */
+            if (why != null && why.startsWith("http: ")) {
+                String rest = why.substring(6);
+                int sp = rest.indexOf(' '), status = 0;
+                try { status = Integer.parseInt(sp > 0 ? rest.substring(0, sp) : rest); } catch (NumberFormatException ignored) { }
+                String msg = sp > 0 ? rest.substring(sp + 1) : rest;
+                fail(msg, 2004 /* ERROR_CODE_IO_BAD_HTTP_STATUS */, httpError(status, msg));
+                return;
+            }
+            if (why != null && why.startsWith("net: ")) { fail(why.substring(5), 2001 /* ERROR_CODE_IO_NETWORK_CONNECTION_FAILED */, new java.io.IOException(why.substring(5))); return; }
+            fallBackToExo(why);
+            return;
+        }
         setState(s);
         boolean playing = nPlaying(h);
         if (playing != lastPlaying) {
@@ -516,6 +534,33 @@ public final class AvPlayer implements InvocationHandler {
                 events(7);
             });
         }
+    }
+
+    /** The exception ExoPlayer's HTTP data source throws for an error status (HttpDataSource.InvalidResponseCodeException): apps read
+     *  its responseCode from the error's cause to pick their next server. Any IOException when it cannot be made. */
+    private Throwable httpError(int status, String msg) {
+        String ds = media3 ? "androidx.media3.datasource." : "com.google.android.exoplayer2.upstream.";
+        try {
+            Class<?> ex = Class.forName(ds + "HttpDataSource$InvalidResponseCodeException", false, cl);
+            Class<?> spec = Class.forName(ds + "DataSpec", false, cl);
+            Object dataSpec = spec.getConstructor(Uri.class).newInstance(Uri.parse(url != null ? url : ""));
+            for (Constructor<?> k : ex.getConstructors()) {
+                Class<?>[] t = k.getParameterTypes();
+                if (t.length == 0 || t[0] != int.class) continue;
+                Object[] a = new Object[t.length];
+                for (int i = 0; i < t.length; i++) {
+                    if (i == 0) a[i] = status;
+                    else if (t[i] == String.class) a[i] = msg;
+                    else if (t[i] == spec) a[i] = dataSpec;
+                    else if (t[i] == Map.class) a[i] = new HashMap<String, List<String>>();
+                    else if (t[i] == byte[].class) a[i] = new byte[0];
+                    else if (t[i] == int.class) a[i] = 1;            /* TYPE_OPEN */
+                    else a[i] = null;                                   /* the IOException cause */
+                }
+                return (Throwable) k.newInstance(a);
+            }
+        } catch (Throwable t) { android.util.Log.w(TAG, "no InvalidResponseCodeException: " + t); }
+        return new java.io.IOException("HTTP " + status + ": " + msg);
     }
 
     private Object videoSize() {
