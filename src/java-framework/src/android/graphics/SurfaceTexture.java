@@ -52,6 +52,10 @@ public class SurfaceTexture {
         synchronized (mLock) {
             if (!mLocked) return;
             mBackCanvas.restore();
+            /* one Canvas on a buffer at a time: each Canvas turns its bitmap's context y-down once, until it is released, so a new
+               one on a buffer whose old one still lived turned it back -- every other frame of a TextureView's video was drawn
+               upside down (PrimeTV's films) -- and the context's saved states piled up */
+            mBackCanvas.huskRelease();
             Bitmap f = mFront; mFront = mBack; mBack = f;
             if (mBack != null && (mBack.getWidth() != mFront.getWidth() || mBack.getHeight() != mFront.getHeight())) mBack = null;
             mBackCanvas = mBack != null ? new Canvas(mBack) : null;
