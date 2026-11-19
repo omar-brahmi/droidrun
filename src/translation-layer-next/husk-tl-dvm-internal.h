@@ -33,6 +33,7 @@ struct dvm_dex {
     char name[96];
     int ns;                         /* 0: the boot class path and the app; else the namespace of a DexFile opened at run time */
     jobj *loader;                   /* a run-time dex: the class loader its classes were first defined through (Class.getClassLoader) */
+    const struct dvmc_module *compiled; /* its methods compiled ahead of time (husk-tl-dvmc.h), or NULL */
 };
 
 struct dvm_field {
@@ -58,6 +59,8 @@ struct dvm_method {
     int vidx;                       /* vtable slot, or -1 */
     int nparams;
     dvm_native_fn intrinsic;        /* an ART-internal native, or NULL */
+    bool (*compiled)(dvm_method *m, uint64_t *regs, jvalue *ret);   /* its bytecode compiled ahead of time (dvmc_fn), or NULL */
+    _Atomic uint32_t calls, loops;  /* TL_DVM_PROFILE: interpreted calls and backward branches taken */
     void *jni;                      /* a JNI native's address, once found */
     bool jni_looked;
     unsigned jni_gen;               /* tl_jni_natives_generation() when jni was looked up */
@@ -111,8 +114,16 @@ void dvm_monitor_enter(jobj *o);
 bool dvm_monitor_exit(jobj *o);
 jobj *dvm_current_thread(void);
 extern int g_dvm_trace;
+extern int g_dvm_profile;
 extern _Thread_local dvm_method *t_frames[8192];
 extern _Thread_local int t_depth;
+
+/* ---- compiled methods (husk-tl-dvmc.c) */
+struct dvmc_api;
+const struct dvmc_api *dvm_compiled_api(void);          /* what a compiled method calls (husk-tl-dvm.c) */
+void dvmc_dex_added(dvm_dex *d);                        /* find and bind the dylib compiled from this DEX file, if any */
+void *dvmc_lookup(const dvm_dex *d, uint32_t midx);     /* the compiled function of that method, or NULL */
+void dvmc_count_call(dvm_method *m);                    /* TL_DVM_PROFILE: count the call, for the compiler's method list */
 
 /* ---- the natives (husk-tl-dvm-natives.c) */
 dvm_native_fn dvm_intrinsic(const char *cls, const char *name, const char *sig);

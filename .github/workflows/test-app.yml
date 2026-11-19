@@ -21,6 +21,9 @@ on:
       script:
         description: "Harness control lines, ; between (tap X Y, wait MS, shot PNG)"
         default: "wait 25000;tap 428 459;wait 20000;shot shot-channels.png;wait 30000"
+      dexc:
+        description: "Compile methods first (tools/dexc/dexc.py options, e.g. --match com/droidrun/bench); runs twice to compare"
+        default: ""
 
 env:
   HUSK_REPO: Leviidev/Husk
@@ -35,7 +38,8 @@ jobs:
 
       - name: Build harness (javaapp-test)
         run: |
-          bash tools/regress/build.sh tools/javaapp-test.c "$GITHUB_WORKSPACE/javaapp-test" 2>&1 | grep -E "error" || true
+          # -O2 as the app's release build: the interpreter compared with compiled methods at the same optimization
+          bash tools/regress/build.sh tools/javaapp-test.c "$GITHUB_WORKSPACE/javaapp-test" -O2 2>&1 | grep -E "error" || true
           test -x "$GITHUB_WORKSPACE/javaapp-test"
 
       - name: Java runtime from the Husk IPA
@@ -95,6 +99,13 @@ jobs:
           (cd media && nohup python3 -m http.server 8765 > ../http.log 2>&1 &)
           sleep 2; curl -sI http://127.0.0.1:8765/live.ts | head -3
 
+      - name: Compile Dalvik methods (dexc)
+        if: inputs.dexc != ''
+        run: |
+          python3 tools/dexc/dexc.py "packager/input/${{ inputs.apk }}" dexc-gen ${{ inputs.dexc }}
+          bash tools/dexc/build.sh dexc-gen dexc-out macos
+          mkdir -p out && cp -R dexc-gen out/dexc-gen
+
       - name: Run
         run: |
           mkdir -p out
@@ -103,16 +114,24 @@ jobs:
           cat ctl.txt
           export TL_CTL="$GITHUB_WORKSPACE/ctl.txt"
           for kv in ${{ inputs.env }}; do export "$kv"; done
-          ./javaapp-test "packager/input/${{ inputs.apk }}" ${{ inputs.seconds }} 856 1852 > out/app.log 2>&1 &
-          PID=$!
-          while kill -0 $PID 2>/dev/null; do
-            echo "$(date +%s) $(ps -o rss= -p $PID 2>/dev/null) $(vmmap --summary $PID 2>/dev/null | awk '/TOTAL/{print $2; exit}')" >> out/memory.txt
-            sleep 2
+          # with dexc: once interpreted, once with the compiled methods, to compare (the Bench lines carry times and checksums)
+          if [ -n "${{ inputs.dexc }}" ]; then modes="interpreted compiled"; else modes="app"; fi
+          for mode in $modes; do
+            if [ $mode = interpreted ]; then export TL_DEXC=0; else unset TL_DEXC; fi
+            if [ $mode = compiled ]; then export TL_DEXC_DIR="$GITHUB_WORKSPACE/dexc-out"; fi
+            log=out/$mode.log; [ $mode = app ] && log=out/app.log
+            ./javaapp-test "packager/input/${{ inputs.apk }}" ${{ inputs.seconds }} 856 1852 > $log 2>&1 &
+            PID=$!
+            while kill -0 $PID 2>/dev/null; do
+              echo "$(date +%s) $(ps -o rss= -p $PID 2>/dev/null) $(vmmap --summary $PID 2>/dev/null | awk '/TOTAL/{print $2; exit}')" >> out/memory-$mode.txt
+              sleep 2
+            done
+            wait $PID; echo "exit: $?" | tee -a $log
+            echo "== $mode: memory (time, RSS KiB, VM total)"; awk 'NR%5==1' out/memory-$mode.txt
+            echo "== $mode: log tail"; tail -40 $log
+            grep -E "Bench|dvmc:" $log || true
+            grep -cE "FATAL|CRASH" $log || true
           done
-          wait $PID; echo "exit: $?" | tee -a out/app.log
-          echo "== memory (time, RSS KiB, VM total)"; cat out/memory.txt | awk 'NR%5==1'
-          echo "== log tail"; tail -40 out/app.log
-          grep -cE "FATAL|CRASH" out/app.log || true
 
       - uses: actions/upload-artifact@v4
         if: always()

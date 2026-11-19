@@ -2257,6 +2257,8 @@ static bool aot_alloc(size_t bytes, uint8_t **rx, uint8_t **rw)
  */
 static char *g_aot_dir;
 void tl_ld_set_aot_dir(const char *dir) { free(g_aot_dir); g_aot_dir = dir && *dir ? strdup(dir) : NULL; }
+/* The folders set above (or TL_AOT_DIR's), for the compiled Dalvik methods' dylibs (husk-tl-dvmc.c); NULL when none. */
+const char *tl_ld_aot_dirs(void) { return g_aot_dir ? g_aot_dir : getenv("TL_AOT_DIR"); }
 
 void tl_aot_file_name(char *out, size_t n, uint64_t hash, const char *lib_name)
 {

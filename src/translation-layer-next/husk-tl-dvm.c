@@ -2,6 +2,7 @@
 /* The Dalvik interpreter. See husk-tl-dvm.h. */
 #define _DARWIN_C_SOURCE
 #include "husk-tl-dvm-internal.h"
+#include "husk-tl-dvmc.h"
 
 #include <math.h>
 #include <stdarg.h>
@@ -18,6 +19,7 @@
 #include "husk-tl-ld.h"
 
 int g_dvm_trace;
+int g_dvm_profile;              /* TL_DVM_PROFILE=<file>: count calls and loops, written to the file for tools/dexc (husk-tl-dvmc.c) */
 void tl_dvm_set_trace(int level) { g_dvm_trace = level; }
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -141,6 +143,7 @@ static bool dex_add(const uint8_t *b, size_t size, const char *label)
     }
     g_dex[g_ndex++] = d;
     tl_log_line("dvm: %s: %u classes (%d new)", label, d->ncls, added);
+    dvmc_dex_added(d);
     return true;
 }
 
@@ -516,6 +519,7 @@ static bool attach(tl_jclass *jc)
                     m->regs = rd16(ci); m->ins = rd16(ci + 2); m->outs = rd16(ci + 4); m->ntries = rd16(ci + 6);
                     m->ninsns = rd32(ci + 12);
                     m->insns = (const uint16_t *)(ci + 16);
+                    if (d->compiled) m->compiled = (bool (*)(dvm_method *, uint64_t *, jvalue *))dvmc_lookup(d, idx);
                 }
                 if (m->flags & 0x100 /* native */) m->intrinsic = dvm_intrinsic(name, m->name, m->sig);
                 else { dvm_native_fn dvm_fast_path(const char *, const char *, const char *); m->intrinsic = dvm_fast_path(name, m->name, m->sig); }
@@ -1050,6 +1054,7 @@ static bool dvm_call_inner(dvm_method *m, jobj *self, const jvalue *params, jval
         if (m->flags & 0x100) return call_native(m, self, params, ret);
         return dvm_throw("java/lang/AbstractMethodError", "%s.%s%s", m->cls->name, m->name, m->sig);
     }
+    if (__builtin_expect(g_dvm_profile, 0) && !m->compiled) dvmc_count_call(m);
     uint64_t small[64];
     uint64_t *regs = m->regs <= 64 ? small : calloc(m->regs, sizeof(uint64_t));
     if (regs == small) memset(small, 0, sizeof(uint64_t) * m->regs);
@@ -1068,7 +1073,7 @@ static bool dvm_call_inner(dvm_method *m, jobj *self, const jvalue *params, jval
         default: regs[r++] = (uint32_t)params[i].i; break;
         }
     }
-    bool ok = interpret(m, regs, ret);
+    bool ok = m->compiled ? m->compiled(m, regs, ret) : interpret(m, regs, ret);
     if (regs != small) free(regs);
     return ok;
 }
@@ -1402,26 +1407,28 @@ static jobj *new_array(tl_jclass *arrcls, int32_t n)
  * the constructor's result replaces it in every register that held it. */
 bool dvm_string_init(const char *sig, const jvalue *params, jvalue *ret);
 
-static bool invoke_regs(dvm_method *caller, int kind, uint32_t midx, int count, const uint16_t *argregs, uint16_t first, bool range,
-                        uint64_t *regs, jvalue *result)
+/* An invoke with its argument registers' values in w[0..count) (a wide value as two words, the second unused), as the bytecode lists
+ * them: what the interpreter and compiled methods (husk-tl-dvmc.h) both call. When a String constructor replaces the placeholder
+ * the new-instance made, *swap_old and *swap_new say so: the caller puts the new object in every register that held the old. */
+static bool invoke_words(dvm_method *caller, int kind, uint32_t midx, const uint64_t *w, int count, jvalue *result,
+                         jobj **swap_old, jobj **swap_new)
 {
     dvm_dex *d = caller->cls->dex;
     bool is_static = kind == 3;
     mref *r = resolve_mref(d, midx, is_static);
     if (r->missing) return throw_missing(r->cls);
-    uint16_t areg[256];
-    for (int i = 0; i < count && i < 256; i++) areg[i] = range ? (uint16_t)(first + i) : argregs[i];
+    (void)count;
     int ai = 0;
     jobj *self = NULL;
     if (!is_static) {
-        self = RL(regs, areg[ai++]);
+        self = (jobj *)(uintptr_t)w[ai++];
         if (!self) return dvm_throw("java/lang/NullPointerException", "Attempt to invoke %s method '%s.%s%s' on a null object reference",
                                      kind == 4 ? "interface" : "virtual", r->cls->name, r->name, r->sig);
         /* not an object at all (a bug elsewhere put something else in the register): say where, rather than crash on it */
         if (self->kind > TL_K_OBJ_ARRAY || (self->kind != TL_K_CLASS && self->cls && (((uintptr_t)self->cls & 7) || !name_start_ok((unsigned char)self->cls->name[0])))) {
-            tl_log_line("dvm: register v%u of %s.%s holds %p, not an object (kind %u, class %p \"%.40s\"), for %s.%s%s", areg[0], caller->cls->name, caller->name,
+            tl_log_line("dvm: the receiver in %s.%s is %p, not an object (kind %u, class %p \"%.40s\"), for %s.%s%s", caller->cls->name, caller->name,
                         (void *)self, self->kind, (void *)self->cls, self->cls && !((uintptr_t)self->cls & 7) ? self->cls->name : "?", r->cls->name, r->name, r->sig);
-            return dvm_throw("java/lang/InternalError", "not an object in v%u for %s.%s", areg[0], r->cls->name, r->name);
+            return dvm_throw("java/lang/InternalError", "not an object as the receiver for %s.%s", r->cls->name, r->name);
         }
     }
     jvalue params[256];                     /* a call can pass up to 255 registers' worth (Kotlin's default-argument constructors do) */
@@ -1429,20 +1436,20 @@ static bool invoke_regs(dvm_method *caller, int kind, uint32_t midx, int count, 
         char k = r->shorty[1 + i];
         params[i].j = 0;
         switch (k) {
-        case 'J': case 'D': params[i].j = RJ(regs, areg[ai]); ai += 2; break;
-        case 'L': params[i].l = RL(regs, areg[ai++]); break;
-        case 'Z': params[i].z = (uint8_t)regs[areg[ai++]]; break;
-        case 'B': params[i].b = (int8_t)regs[areg[ai++]]; break;
-        case 'C': params[i].c = (uint16_t)regs[areg[ai++]]; break;
-        case 'S': params[i].s = (int16_t)regs[areg[ai++]]; break;
-        default: params[i].i = RI(regs, areg[ai++]); break;
+        case 'J': case 'D': params[i].j = (int64_t)w[ai]; ai += 2; break;
+        case 'L': params[i].l = (jobj *)(uintptr_t)w[ai++]; break;
+        case 'Z': params[i].z = (uint8_t)w[ai++]; break;
+        case 'B': params[i].b = (int8_t)w[ai++]; break;
+        case 'C': params[i].c = (uint16_t)w[ai++]; break;
+        case 'S': params[i].s = (int16_t)w[ai++]; break;
+        default: params[i].i = (int32_t)(uint32_t)w[ai++]; break;
         }
     }
     /* String's constructors */
     if (kind == 2 && self && self->kind == TL_K_OBJECT && self->cls == g_string_class && !strcmp(r->name, "<init>")) {
         jvalue s;
         if (!dvm_string_init(r->sig, params, &s)) return false;
-        for (int i = 0; i < caller->regs; i++) if (regs[i] == (uint64_t)(uintptr_t)self) regs[i] = (uint64_t)(uintptr_t)s.l;
+        *swap_old = self; *swap_new = s.l;
         result->l = s.l;
         return true;
     }
@@ -1504,7 +1511,7 @@ static bool invoke_regs(dvm_method *caller, int kind, uint32_t midx, int count, 
       if (watch[0] && !strcmp(target->name, strchr(watch, '.') + 1) && !strncmp(target->cls->name, watch, (size_t)(strchr(watch, '.') - watch))) {
           char b[600]; int o = 0;
           for (int i = 0; i < r->nparams && i < 10; i++) o += snprintf(b + o, sizeof(b) - o, " %c:%llx", r->shorty[1 + i], (unsigned long long)params[i].j);
-          tl_log_line("dvm: args %s.%s from %s.%s regs[%d..]:%s", target->cls->name, target->name, caller->cls->name, caller->name, areg[0], b);
+          tl_log_line("dvm: args %s.%s from %s.%s:%s", target->cls->name, target->name, caller->cls->name, caller->name, b);
           /* TL_DVM_ARGS_STR: and what each object argument says of itself */
           if (getenv("TL_DVM_ARGS_STR")) for (int i = 0; i < r->nparams && i < 10; i++) {
               if (r->shorty[1 + i] != 'L' || !params[i].l) continue;
@@ -1516,6 +1523,17 @@ static bool invoke_regs(dvm_method *caller, int kind, uint32_t midx, int count, 
           }
       } }
     return dvm_call(target, self, params, result);
+}
+
+static bool invoke_regs(dvm_method *caller, int kind, uint32_t midx, int count, const uint16_t *argregs, uint16_t first, bool range,
+                        uint64_t *regs, jvalue *result)
+{
+    uint64_t w[256];
+    for (int i = 0; i < count && i < 256; i++) w[i] = regs[range ? (uint16_t)(first + i) : argregs[i]];
+    jobj *old = NULL, *new = NULL;
+    if (!invoke_words(caller, kind, midx, w, count, result, &old, &new)) return false;
+    if (old) for (int i = 0; i < caller->regs; i++) if (regs[i] == (uint64_t)(uintptr_t)old) regs[i] = (uint64_t)(uintptr_t)new;
+    return true;
 }
 
 /* A value returned from C is only defined in its own width; the registers want ints zero-extended, sub-ints widened. */
@@ -1749,8 +1767,10 @@ dispatch:;
         if (!e) dvm_throw("java/lang/NullPointerException", "throw with null exception"); else tl_jni_set_pending(e);
         goto exception;
     }
-    case 0x28: pc += (int8_t)AA; goto dispatch;
-    case 0x29: pc += (int16_t)FETCH(1); goto dispatch;
+/* a branch back: a loop's turn, which TL_DVM_PROFILE counts (a method that loops long is hot though called once) */
+#define LOOP(off) do { if (__builtin_expect(g_dvm_profile, 0) && (off) <= 0) m->loops++; } while (0)
+    case 0x28: LOOP((int8_t)AA); pc += (int8_t)AA; goto dispatch;
+    case 0x29: LOOP((int16_t)FETCH(1)); pc += (int16_t)FETCH(1); goto dispatch;
     case 0x2a: pc += (int32_t)(FETCH(1) | (uint32_t)FETCH(2) << 16); goto dispatch;
     case 0x2b: {                                                   /* packed-switch */
         const uint16_t *p = insns + pc + (int32_t)(FETCH(1) | (uint32_t)FETCH(2) << 16);
@@ -1781,7 +1801,7 @@ dispatch:;
         WI(regs, AA, a < b ? -1 : a > b ? 1 : a == b ? 0 : ((w & 0xFF) == 0x2f ? -1 : 1)); NEXT(2);
     }
     case 0x31: { int64_t a = RJ(regs, FETCH(1) & 0xFF), b = RJ(regs, FETCH(1) >> 8); WI(regs, AA, a < b ? -1 : a > b); NEXT(2); }
-#define IFCMP(op, cond) case op: if (cond) { pc += (int16_t)FETCH(1); goto dispatch; } NEXT(2);
+#define IFCMP(op, cond) case op: if (cond) { LOOP((int16_t)FETCH(1)); pc += (int16_t)FETCH(1); goto dispatch; } NEXT(2);
     /* ints are kept zero-extended and references whole, so equality is the whole register either way */
     IFCMP(0x32, regs[A4] == regs[B4])
     IFCMP(0x33, regs[A4] != regs[B4])
@@ -2045,6 +2065,204 @@ done:
     return true;
 }
 
+/* ================================================================== what compiled methods call (husk-tl-dvmc.h) */
+
+/* Each does what the interpreter's instruction of the same name does, with its messages. */
+
+static uint32_t g_dvmc_gen = 1;
+
+static bool c_invoke(dvm_method *caller, uint32_t pc, int kind, uint32_t midx, const uint64_t *w, int n, jvalue *result,
+                     jobj **swap_old, jobj **swap_new)
+{
+    if (t_depth > 0 && t_depth <= 8192) t_pcs[t_depth - 1] = pc;
+    result->j = 0;
+    if (!invoke_words(caller, kind, midx, w, n, result, swap_old, swap_new)) return false;
+    normalize(((mref *)caller->cls->dex->mcache[midx])->shorty[0], result);
+    return true;
+}
+
+static void field_rw(char type, bool put, jvalue *slot, uint64_t *reg)
+{
+    switch (type) {
+    case 'J': case 'D': if (put) slot->j = (int64_t)*reg; else *reg = (uint64_t)slot->j; break;
+    case 'L': if (put) slot->l = (void *)(uintptr_t)*reg; else *reg = (uint64_t)(uintptr_t)slot->l; break;
+    case 'Z': if (put) { slot->j = 0; slot->z = (uint8_t)*reg; } else *reg = (uint32_t)slot->z; break;
+    case 'B': if (put) { slot->j = 0; slot->b = (int8_t)*reg; } else *reg = (uint32_t)(int32_t)slot->b; break;
+    case 'C': if (put) { slot->j = 0; slot->c = (uint16_t)*reg; } else *reg = (uint32_t)slot->c; break;
+    case 'S': if (put) { slot->j = 0; slot->s = (int16_t)*reg; } else *reg = (uint32_t)(int32_t)slot->s; break;
+    default: if (put) { slot->j = 0; slot->i = (int32_t)(uint32_t)*reg; } else *reg = (uint32_t)slot->i; break;
+    }
+}
+
+static bool c_field(dvm_method *m, uint32_t idx, bool is_static, bool put, jobj *o, uint64_t *reg, dvmc_field *c)
+{
+    dvm_dex *dex = m->cls->dex;
+    fref *f = resolve_fref(dex, idx, is_static);
+    jvalue *slot;
+    if (is_static) {
+        if (f->missing) return throw_missing(f->cls);
+        if (f->df) {
+            if (!dvm_ensure_init(f->df->cls)) return false;
+            slot = &f->df->cls->jc->statics[f->df->slot];
+            /* only once its class is initialized for good: until then each access has to go through dvm_ensure_init */
+            if (f->df->cls->state == CS_INITIALIZED) {
+                c->place = slot; c->type = f->type; c->how = DVMC_F_STATIC;
+                __atomic_store_n(&c->gen, g_dvmc_gen, __ATOMIC_RELEASE);  /* last: a reader that sees it sees the rest */
+            }
+        } else {
+            if (!f->hf) return dvm_throw("java/lang/NoSuchFieldError", "static field %u", idx);
+            slot = tl_jni_field_slot(NULL, f->hf);
+        }
+    } else {
+        if (!o) return dvm_throw("java/lang/NullPointerException", "Attempt to %s field on a null object reference", put ? "write to" : "read from");
+        if (f->df) {
+            bool klass = f->df->name[0] == 's' && !strcmp(f->df->name, "shadow$_klass_");
+            bool count = !strcmp(f->df->name, "count") && f->df->cls->jc == g_string_class;
+            if (!put && klass) { *reg = (uint64_t)(uintptr_t)dvm_object_class(o)->mirror; return true; }
+            if (o->kind == TL_K_STRING && !put && count) {
+                int32_t n; const uint16_t *s = tl_dvm_string_chars(o, &n);
+                bool latin1 = true;
+                for (int32_t k = 0; k < n && latin1; k++) if (s[k] > 0xFF) latin1 = false;
+                *reg = (uint32_t)((n << 1) | (latin1 ? 0 : 1));
+                return true;
+            }
+            slot = &dvm_slots_for(o, f->df->slot)[f->df->slot];
+            if (!klass && !count) {
+                c->slot = f->df->slot; c->type = f->type; c->how = DVMC_F_SLOT;
+                __atomic_store_n(&c->gen, g_dvmc_gen, __ATOMIC_RELEASE);
+            }
+        } else {
+            if (!f->hf) return dvm_throw("java/lang/NoSuchFieldError", "field %u", idx);
+            slot = tl_jni_field_slot(o, f->hf);
+        }
+    }
+    field_rw(f->type, put, slot, reg);
+    return true;
+}
+
+static jobj *c_const_string(dvm_method *m, uint32_t idx) { return const_string(m->cls->dex, idx); }
+static jobj *c_const_class(dvm_method *m, uint32_t t) { return resolve_type(m->cls->dex, t)->mirror; }
+
+static bool c_check_cast(dvm_method *m, jobj *o, uint32_t t)
+{
+    if (!o) return true;
+    tl_jclass *c = resolve_type(m->cls->dex, t);
+    if (dvm_instance_of(o, c)) return true;
+    tl_jclass *oc = dvm_object_class(o);
+    return dvm_throw("java/lang/ClassCastException", "%s cannot be cast to %s", oc ? oc->name : "?", c->name);
+}
+
+static int32_t c_instance_of(dvm_method *m, jobj *o, uint32_t t) { return dvm_instance_of(o, resolve_type(m->cls->dex, t)); }
+
+static jobj *c_new_instance(dvm_method *m, uint32_t t)
+{
+    tl_jclass *c = resolve_type(m->cls->dex, t);
+    dvm_class *dc = dvm_class_of(c);
+    if (!dc && class_missing(c)) { throw_missing(c); return NULL; }
+    if (dc && !dvm_ensure_init(dc)) return NULL;
+    jobj *o = dvm_new_object(c);
+    if (dc) dvm_slots(o);
+    return o;
+}
+
+static jobj *c_new_array(dvm_method *m, int32_t n, uint32_t t)
+{
+    if (n < 0) { dvm_throw("java/lang/NegativeArraySizeException", "%d", n); return NULL; }
+    tl_jclass *ac = resolve_type(m->cls->dex, t);
+    char e = ac->name[1];
+    uint64_t esz = e == 'Z' || e == 'B' ? 1 : e == 'C' || e == 'S' ? 2 : e == 'I' || e == 'F' ? 4 : 8;
+    if ((uint64_t)n * esz > (256ull << 20)) {
+        dvm_throw("java/lang/OutOfMemoryError", "Failed to allocate a %llu byte allocation with 0 free bytes", (unsigned long long)((uint64_t)n * esz));
+        return NULL;
+    }
+    return new_array(ac, n);
+}
+
+static jobj *c_filled_new_array(dvm_method *m, uint32_t t, const uint64_t *w, int n)
+{
+    jobj *a = new_array(resolve_type(m->cls->dex, t), n);
+    for (int i = 0; i < n; i++) {
+        if (a->kind == TL_K_OBJ_ARRAY) a->oarr.v[i] = (jobj *)(uintptr_t)w[i];
+        else ((int32_t *)a->arr.data)[i] = (int32_t)(uint32_t)w[i];
+    }
+    return a;
+}
+
+static bool c_fill_array_data(dvm_method *m, jobj *a, uint32_t payload_pc)
+{
+    if (!a) return dvm_throw("java/lang/NullPointerException", "fill-array-data on null");
+    const uint16_t *p = m->insns + payload_pc;
+    uint16_t width = p[1]; uint32_t n = p[2] | (uint32_t)p[3] << 16;
+    if (n > a->arr.len) return dvm_throw("java/lang/ArrayIndexOutOfBoundsException", "fill-array-data");
+    memcpy(a->arr.data, p + 4, (size_t)width * n);
+    return true;
+}
+
+static bool c_aput_object(jobj *a, int32_t i, jobj *v)
+{
+    if (v && a->cls && a->cls->name[0] == '[' && a->cls->name[1] == 'L') {
+        tl_jclass *ec = class_for_desc(a->cls->name + 1);
+        if (!dvm_instance_of(v, ec)) return dvm_throw("java/lang/ArrayStoreException", "%s cannot be stored in an array of type %s", dvm_object_class(v)->name, a->cls->name);
+    }
+    a->oarr.v[i] = v;
+    return true;
+}
+
+static bool c_monitor_enter(jobj *o)
+{
+    if (!o) return dvm_throw("java/lang/NullPointerException", "monitor-enter on null");
+    dvm_monitor_enter(o);
+    return true;
+}
+
+static bool c_monitor_exit(jobj *o)
+{
+    if (!o) return dvm_throw("java/lang/NullPointerException", "monitor-exit on null");
+    dvm_monitor_exit(o);
+    return true;
+}
+
+static bool c_throw_obj(jobj *e)
+{
+    if (!e) return dvm_throw("java/lang/NullPointerException", "throw with null exception");
+    tl_jni_set_pending(e);
+    return false;
+}
+
+static bool c_throw_npe(const char *what) { return dvm_throw("java/lang/NullPointerException", "%s", what); }
+static bool c_throw_index(jobj *a, int32_t i) { return array_check(a, i); }
+static bool c_throw_div_zero(void) { return dvm_throw("java/lang/ArithmeticException", "divide by zero"); }
+static bool c_throw_neg_size(int32_t n) { return dvm_throw("java/lang/NegativeArraySizeException", "%d", n); }
+
+static bool c_handler(dvm_method *m, uint32_t pc, uint32_t *target, jobj **caught)
+{
+    jobj *e = tl_jni_pending_object();
+    if (!e) { dvm_throw("java/lang/InternalError", "exception with nothing pending"); e = tl_jni_pending_object(); }
+    if (!find_handler(m, pc, e, target)) return false;
+    tl_jni_set_pending(NULL);
+    *caught = e;
+    return true;
+}
+
+static jobj *c_sync_enter(dvm_method *m, uint64_t *regs)
+{
+    jobj *o = (m->flags & 8) ? m->cls->jc->mirror : RL(regs, m->regs - m->ins);
+    dvm_monitor_enter(o);
+    return o;
+}
+
+static const dvmc_api g_dvmc_api = {
+    .version = DVMC_VERSION, .gen = &g_dvmc_gen,
+    .invoke = c_invoke, .field = c_field, .const_string = c_const_string, .const_class = c_const_class,
+    .check_cast = c_check_cast, .instance_of = c_instance_of, .new_instance = c_new_instance, .new_array = c_new_array,
+    .filled_new_array = c_filled_new_array, .fill_array_data = c_fill_array_data, .aput_object = c_aput_object,
+    .monitor_enter = c_monitor_enter, .monitor_exit = c_monitor_exit, .throw_obj = c_throw_obj, .throw_npe = c_throw_npe,
+    .throw_index = c_throw_index, .throw_div_zero = c_throw_div_zero, .throw_neg_size = c_throw_neg_size,
+    .handler = c_handler, .sync_enter = c_sync_enter,
+};
+
+const dvmc_api *dvm_compiled_api(void) { return &g_dvmc_api; }
+
 /* ================================================================== the JNI world's view */
 
 static bool hook_attach(tl_jclass *jc)
@@ -2210,6 +2428,7 @@ void tl_dvm_drop_app(void)
     }
     g_ndex = g_nboot_dex;
     g_app_loader = NULL;
+    __atomic_add_fetch(&g_dvmc_gen, 1, __ATOMIC_RELEASE);  /* compiled sites' field caches named the app's classes */
     for (int i = g_nboot_cp; i < g_ncp; i++) free(g_cp[i]);
     g_ncp = g_nboot_cp;
     pthread_mutex_lock(&g_open_lock);
