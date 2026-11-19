@@ -4,11 +4,16 @@ package android.media;
 @SuppressWarnings({"unchecked", "rawtypes", "deprecation"})
 public final class MediaCrypto {
     private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
-    public MediaCrypto(java.util.UUID p0, byte[] p1) {}
-    public static boolean isCryptoSchemeSupported(java.util.UUID p0) { return false; }
+    /* the MediaDrm session whose ClearKey keys decrypt the samples a MediaCodec configured with this gets (husk.ClearKey) */
+    public byte[] huskSession;
+    public MediaCrypto(java.util.UUID p0, byte[] p1) throws android.media.MediaCryptoException {
+        if (p0 != null && !husk.ClearKey.supports(p0)) throw new android.media.MediaCryptoException("DroidRun plays ClearKey only");
+        huskSession = p1;
+    }
+    public static boolean isCryptoSchemeSupported(java.util.UUID p0) { return husk.ClearKey.supports(p0); }
     protected void finalize() {}
     public void release() {}
     public boolean requiresSecureDecoderComponent(java.lang.String p0) { return false; }
-    public void setMediaDrmSession(byte[] p0) { huskProps.put("MediaDrmSession", p0); }
-    MediaCrypto() { this((java.util.UUID) null, (byte[]) null); }
+    public void setMediaDrmSession(byte[] p0) { huskSession = p0; }
+    MediaCrypto() {}
 }

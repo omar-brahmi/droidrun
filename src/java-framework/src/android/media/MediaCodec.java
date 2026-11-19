@@ -56,6 +56,7 @@ public final class MediaCodec {
     private int mState = ST_UNINITIALIZED, mGeneration, mScaling = VIDEO_SCALING_MODE_SCALE_TO_FIT;
     private final Object mLock = new Object();
     private Surface mSurface;
+    private MediaCrypto mCrypto;            /* ClearKey: its session decrypts queueSecureInputBuffer's samples (husk.ClearKey) */
     private MediaFormat mInputFormat, mOutputFormat;
     private ByteBuffer[] mInputs;
     private final ArrayDeque<Integer> mFreeInputs = new ArrayDeque<>();
@@ -102,7 +103,7 @@ public final class MediaCodec {
             if (mState != ST_UNINITIALIZED) throw new IllegalStateException("configure in state " + mState);
             if ((flags & CONFIGURE_FLAG_ENCODE) != 0) throw new IllegalStateException("DroidRun has no encoders");
             MediaFormat f = format != null ? new MediaFormat(format) : new MediaFormat();
-            mInputFormat = f; mSurface = surface;
+            mInputFormat = f; mSurface = surface; mCrypto = crypto;
             int w = f.getInteger(MediaFormat.KEY_WIDTH, 0), h = f.getInteger(MediaFormat.KEY_HEIGHT, 0);
             int rate = f.getInteger(MediaFormat.KEY_SAMPLE_RATE, 0), ch = f.getInteger(MediaFormat.KEY_CHANNEL_COUNT, 0);
             if (!husk.MediaCodecNative.configure(mNative, w, h, rate, ch, bytes(f.getByteBuffer("csd-0")), bytes(f.getByteBuffer("csd-1")), bytes(f.getByteBuffer("csd-2"))))
@@ -179,10 +180,27 @@ public final class MediaCodec {
         if (mCallback != null) postInput(gen, index);
     }
     public void queueSecureInputBuffer(int index, int offset, CryptoInfo info, long ptsUs, int flags) {
-        if (info != null && info.mode != CRYPTO_MODE_UNENCRYPTED) throw new CryptoException(CryptoException.ERROR_UNSUPPORTED_OPERATION, "DroidRun cannot decrypt protected media");
         int size = 0;
-        if (info != null && info.numBytesOfClearData != null) for (int i = 0; i < info.numSubSamples; i++) size += info.numBytesOfClearData[i] + (info.numBytesOfEncryptedData != null ? info.numBytesOfEncryptedData[i] : 0);
-        queueInputBuffer(index, offset, size, ptsUs, flags);
+        if (info != null) for (int i = 0; i < info.numSubSamples; i++)
+            size += (info.numBytesOfClearData != null ? info.numBytesOfClearData[i] : 0) + (info.numBytesOfEncryptedData != null ? info.numBytesOfEncryptedData[i] : 0);
+        if (info == null || info.mode == CRYPTO_MODE_UNENCRYPTED) { queueInputBuffer(index, offset, size, ptsUs, flags); return; }
+        if (index < 0 || index >= INPUTS) throw new IllegalArgumentException("bad input index " + index);
+        synchronized (mLock) { requireRunning(); }
+        /* ClearKey: the sample decrypted here, then decoded as a clear one */
+        byte[] data = new byte[size];
+        ByteBuffer d = mInputs[index].duplicate(); d.clear(); d.position(offset); d.get(data, 0, size);
+        boolean ok;
+        try {
+            ok = mCrypto != null && husk.ClearKey.decrypt(mCrypto.huskSession, data, 0, info.numSubSamples, info.numBytesOfClearData, info.numBytesOfEncryptedData,
+                                                           info.key, info.iv, info.mode, info.getPattern().getEncryptBlocks(), info.getPattern().getSkipBlocks());
+        } catch (Exception e) {
+            throw new CryptoException(CryptoException.ERROR_UNSUPPORTED_OPERATION, "ClearKey decrypt: " + e);
+        }
+        if (!ok) throw new CryptoException(CryptoException.ERROR_NO_KEY, mCrypto == null ? "no MediaCrypto: protected media without DRM" : "ClearKey: no key for this sample");
+        decode(data, size, ptsUs, flags);
+        int gen;
+        synchronized (mLock) { mFreeInputs.add(index); mLock.notifyAll(); gen = mGeneration; }
+        if (mCallback != null) postInput(gen, index);
     }
     public void queueInputBuffers(int index, ArrayDeque infos) {
         for (Object o : infos) { BufferInfo b = (BufferInfo) o; queueInputBuffer(index, b.offset, b.size, b.presentationTimeUs, b.flags); }

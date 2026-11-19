@@ -18,7 +18,7 @@ public final class MediaExtractor {
     public android.media.MediaExtractor.CasInfo getCasInfo(int p0) { return null; }
     public android.media.DrmInitData getDrmInitData() { return (android.media.DrmInitData) huskProps.get("DrmInitData"); }
     public android.media.metrics.LogSessionId getLogSessionId() { return (android.media.metrics.LogSessionId) huskProps.get("LogSessionId"); }
-    public android.os.PersistableBundle getMetrics() { return (android.os.PersistableBundle) huskProps.get("Metrics"); }
+    public android.os.PersistableBundle getMetrics() { Object m = huskProps.get("Metrics"); return m != null ? (android.os.PersistableBundle) m : new android.os.PersistableBundle(); }   /* never null on Android */
     public java.util.Map getPsshInfo() { return (huskProps.get("PsshInfo") != null ? (java.util.Map) huskProps.get("PsshInfo") : new java.util.HashMap()); }
     public boolean getSampleCryptoInfo(android.media.MediaCodec.CryptoInfo p0) { return false; }
     public int getSampleFlags() { return (huskProps.get("SampleFlags") instanceof Integer ? (Integer) huskProps.get("SampleFlags") : 0); }

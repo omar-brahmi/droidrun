@@ -28,6 +28,8 @@ final class Ops {
         t("lambdas", lambdas());
         t("math", math());
         t("line-number", lineNumber());
+        t("clearkey (1 = works)", clearKey());
+        t("media-metrics (1 = works)", mediaMetrics());
         Log.i("Ops", "done");
     }
 
@@ -282,6 +284,68 @@ final class Ops {
             + Double.doubleToRawLongBits(Math.ceil(d));
         s += Math.abs(Integer.MIN_VALUE) + Math.abs(-5) + Math.abs(Long.MIN_VALUE) + Math.min(-3, 4) + Math.max(7L, -9L);
         return s;
+    }
+
+    /** ClearKey through MediaDrm (session, license request and response), then the framework's sample decryption (husk.ClearKey,
+     *  as MediaCodec.queueSecureInputBuffer uses it) checked against data encrypted here: 'cenc' CTR over two subsamples, and
+     *  'cbcs' CBC with a 1:1 pattern. 1 when everything matches. */
+    static long clearKey() {
+        try {
+            java.util.UUID ck = new java.util.UUID(0xe2719d58a985b3c9L, 0x781ab030af78d30eL);
+            if (!android.media.MediaDrm.isCryptoSchemeSupported(ck)) return -1;
+            android.media.MediaDrm drm = new android.media.MediaDrm(ck);
+            byte[] session = drm.openSession();
+            byte[] kid = new byte[16], key = new byte[16], iv = new byte[16];
+            for (int i = 0; i < 16; i++) { kid[i] = (byte) (0xa0 + i); key[i] = (byte) (i * 17); iv[i] = (byte) (i == 15 ? 0 : 7 * i); }
+            // a version 1 PSSH box naming the key id
+            java.nio.ByteBuffer pssh = java.nio.ByteBuffer.allocate(52);
+            pssh.putInt(52).put("pssh".getBytes()).putInt(0x01000000).putLong(0x1077efecc0b24d02L).putLong(0xace33c1e52e2fb4bL).putInt(1).put(kid).putInt(0);
+            String req = new String(drm.getKeyRequest(session, pssh.array(), "cenc", android.media.MediaDrm.KEY_TYPE_STREAMING, null).getData(), "UTF-8");
+            String b64kid = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(kid);
+            if (!req.contains(b64kid)) return -2;
+            String lic = "{\"keys\":[{\"kty\":\"oct\",\"kid\":\"" + b64kid + "\",\"k\":\"" + java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(key) + "\"}]}";
+            drm.provideKeyResponse(session, lic.getBytes("UTF-8"));
+            Class<?> c = Class.forName("husk.ClearKey");
+            java.lang.reflect.Method dec = c.getMethod("decrypt", byte[].class, byte[].class, int.class, int.class, int[].class, int[].class,
+                                                       byte[].class, byte[].class, int.class, int.class, int.class);
+            byte[] plain = new byte[100];
+            for (int i = 0; i < plain.length; i++) plain[i] = (byte) (i * 31 + 5);
+            javax.crypto.spec.SecretKeySpec k = new javax.crypto.spec.SecretKeySpec(key, "AES");
+            // cenc: clear 10, encrypted 30, clear 20, encrypted 40; one keystream over the 70 encrypted bytes
+            javax.crypto.Cipher ctr = javax.crypto.Cipher.getInstance("AES/CTR/NoPadding");
+            ctr.init(javax.crypto.Cipher.ENCRYPT_MODE, k, new javax.crypto.spec.IvParameterSpec(iv));
+            byte[] enc = plain.clone();
+            byte[] ks = ctr.update(new byte[70]);
+            for (int i = 0; i < 30; i++) enc[10 + i] ^= ks[i];
+            for (int i = 0; i < 40; i++) enc[60 + i] ^= ks[30 + i];
+            dec.invoke(null, session, enc, 0, 2, new int[] { 10, 20 }, new int[] { 30, 40 }, kid, iv, 1, 0, 0);
+            if (!java.util.Arrays.equals(enc, plain)) return -3;
+            // cbcs: clear 4, then 96 bytes = 6 blocks with a 1:1 pattern (blocks 0, 2, 4 encrypted, chained)
+            javax.crypto.Cipher cbc = javax.crypto.Cipher.getInstance("AES/CBC/NoPadding");
+            cbc.init(javax.crypto.Cipher.ENCRYPT_MODE, k, new javax.crypto.spec.IvParameterSpec(iv));
+            byte[] enc2 = plain.clone();
+            for (int b = 0; b < 6; b += 2) { byte[] o = cbc.update(plain, 4 + 16 * b, 16); System.arraycopy(o, 0, enc2, 4 + 16 * b, 16); }
+            dec.invoke(null, session, enc2, 0, 1, new int[] { 4 }, new int[] { 96 }, kid, iv, 2, 1, 1);
+            if (!java.util.Arrays.equals(enc2, plain)) return -4;
+            drm.closeSession(session);
+            return 1;
+        } catch (Throwable e) {
+            Log.w("Ops", "clearkey: " + e);
+            return -100;
+        }
+    }
+
+    /** What players read without a check (the Google Mobile Ads video player): MediaPlayer.getMetrics() is never null. */
+    static long mediaMetrics() {
+        try {
+            android.media.MediaPlayer p = new android.media.MediaPlayer();
+            android.os.PersistableBundle m = p.getMetrics();
+            p.release();
+            return m != null && m.getInt("android.media.mediaplayer.width") == 0 ? 1 : 0;
+        } catch (Throwable e) {
+            Log.w("Ops", "media-metrics: " + e);
+            return -100;
+        }
     }
 
     static int lineNumber() {

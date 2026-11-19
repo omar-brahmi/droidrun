@@ -218,7 +218,7 @@ public class AudioTrack implements AudioRouting {
     public int getDualMonoMode() { return (huskFill.get("DualMonoMode") instanceof Integer ? (Integer) huskFill.get("DualMonoMode") : 0); }
     public int getLatency() { return 0; }
     public android.media.metrics.LogSessionId getLogSessionId() { Object v = huskFill.get("LogSessionId"); return v != null ? (android.media.metrics.LogSessionId) v : android.media.metrics.LogSessionId.LOG_SESSION_ID_NONE; }
-    public android.os.PersistableBundle getMetrics() { return null; }
+    public android.os.PersistableBundle getMetrics() { return new android.os.PersistableBundle(); }   /* never null on Android */
     protected int getNativeFrameCount() { return 0; }
     public int getOffloadDelay() { return 0; }
     public int getOffloadPadding() { return 0; }

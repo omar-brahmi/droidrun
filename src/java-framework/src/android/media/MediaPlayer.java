@@ -380,7 +380,20 @@ public class MediaPlayer implements AudioRouting {
     public android.media.MediaPlayer.DrmInfo getDrmInfo() { return null; }
     public java.lang.String getDrmPropertyString(java.lang.String p0) { return null; }
     public android.media.MediaDrm.KeyRequest getKeyRequest(byte[] p0, byte[] p1, java.lang.String p2, int p3, java.util.Map p4) { return null; }
-    public android.os.PersistableBundle getMetrics() { return null; }
+    /* never null on Android: players read it without a check (the Google Mobile Ads video player calls getInt on it) */
+    public android.os.PersistableBundle getMetrics() {
+        android.os.PersistableBundle b = new android.os.PersistableBundle();
+        b.putInt("android.media.mediaplayer.width", getVideoWidth());
+        b.putInt("android.media.mediaplayer.height", getVideoHeight());
+        b.putInt("android.media.mediaplayer.frames", 0);
+        b.putInt("android.media.mediaplayer.dropped", 0);
+        int d = mState == IDLE || mState == INITIALIZED || mState == ERROR ? -1 : getDuration();
+        b.putLong("android.media.mediaplayer.durationMs", d < 0 ? 0 : d);
+        b.putLong("android.media.mediaplayer.playingMs", 0);
+        b.putInt("android.media.mediaplayer.err", 0);
+        b.putInt("android.media.mediaplayer.errcode", 0);
+        return b;
+    }
     public java.util.List getRoutedDevices() { return new java.util.ArrayList(); }
     public int getSelectedTrack(int p0) { return 0; }
     public android.media.SyncParams getSyncParams() { return (android.media.SyncParams) huskFill.get("SyncParams"); }

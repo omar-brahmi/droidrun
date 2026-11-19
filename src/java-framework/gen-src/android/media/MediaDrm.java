@@ -37,45 +37,57 @@ public final class MediaDrm implements java.lang.AutoCloseable {
     public static final int SECURITY_LEVEL_SW_SECURE_CRYPTO = 1;
     public static final int SECURITY_LEVEL_SW_SECURE_DECODE = 2;
     public static final int SECURITY_LEVEL_UNKNOWN = 0;
-    public MediaDrm(java.util.UUID p0) {}
-    public static int getMaxSecurityLevel() { return 0; }
-    public static java.util.List getSupportedCryptoSchemes() { return new java.util.ArrayList(); }
-    public static boolean isCryptoSchemeSupported(java.util.UUID p0) { return false; }
-    public static boolean isCryptoSchemeSupported(java.util.UUID p0, java.lang.String p1) { return false; }
-    public static boolean isCryptoSchemeSupported(java.util.UUID p0, java.lang.String p1, int p2) { return false; }
+    /* ClearKey only (husk.ClearKey): Widevine and PlayReady need a vendor's secure module, which iOS does not have */
+    private final java.util.UUID huskScheme;
+    public MediaDrm(java.util.UUID p0) throws android.media.UnsupportedSchemeException {
+        if (p0 != null && !husk.ClearKey.supports(p0)) throw new android.media.UnsupportedSchemeException("DroidRun plays ClearKey only, not " + p0);
+        huskScheme = p0;
+    }
+    public static int getMaxSecurityLevel() { return SECURITY_LEVEL_SW_SECURE_CRYPTO; }
+    public static java.util.List getSupportedCryptoSchemes() { java.util.ArrayList l = new java.util.ArrayList(); l.add(husk.ClearKey.CLEARKEY); return l; }
+    public static boolean isCryptoSchemeSupported(java.util.UUID p0) { return husk.ClearKey.supports(p0); }
+    public static boolean isCryptoSchemeSupported(java.util.UUID p0, java.lang.String p1) { return husk.ClearKey.supports(p0); }
+    public static boolean isCryptoSchemeSupported(java.util.UUID p0, java.lang.String p1, int p2) { return husk.ClearKey.supports(p0); }
     public void clearOnEventListener() {}
     public void clearOnExpirationUpdateListener() {}
     public void clearOnKeyStatusChangeListener() {}
     public void clearOnSessionLostStateListener() {}
     public void close() {}
-    public void closeSession(byte[] p0) {}
+    public void closeSession(byte[] p0) { husk.ClearKey.closeSession(p0); }
     protected void finalize() {}
     public android.media.MediaDrm.CertificateRequest getCertificateRequest(int p0, java.lang.String p1) { return null; }
     public int getConnectedHdcpLevel() { return (huskProps.get("ConnectedHdcpLevel") instanceof Integer ? (Integer) huskProps.get("ConnectedHdcpLevel") : 0); }
     public android.media.MediaDrm.CryptoSession getCryptoSession(byte[] p0, java.lang.String p1, java.lang.String p2) { return null; }
-    public android.media.MediaDrm.KeyRequest getKeyRequest(byte[] p0, byte[] p1, java.lang.String p2, int p3, java.util.HashMap p4) { return null; }
+    public android.media.MediaDrm.KeyRequest getKeyRequest(byte[] p0, byte[] p1, java.lang.String p2, int p3, java.util.HashMap p4) {
+        KeyRequest r = new KeyRequest();
+        r.huskProps.put("Data", husk.ClearKey.keyRequest(p1, p2)); r.huskProps.put("DefaultUrl", ""); r.huskProps.put("RequestType", 0);
+        return r;
+    }
     public java.util.List getLogMessages() { return (huskProps.get("LogMessages") != null ? (java.util.List) huskProps.get("LogMessages") : new java.util.ArrayList()); }
     public int getMaxHdcpLevel() { return (huskProps.get("MaxHdcpLevel") instanceof Integer ? (Integer) huskProps.get("MaxHdcpLevel") : 0); }
-    public int getMaxSessionCount() { return (huskProps.get("MaxSessionCount") instanceof Integer ? (Integer) huskProps.get("MaxSessionCount") : 0); }
-    public android.os.PersistableBundle getMetrics() { return (android.os.PersistableBundle) huskProps.get("Metrics"); }
+    public int getMaxSessionCount() { return 16; }
+    public android.os.PersistableBundle getMetrics() { Object m = huskProps.get("Metrics"); return m != null ? (android.os.PersistableBundle) m : new android.os.PersistableBundle(); }   /* never null on Android */
     public java.util.List getOfflineLicenseKeySetIds() { return (huskProps.get("OfflineLicenseKeySetIds") != null ? (java.util.List) huskProps.get("OfflineLicenseKeySetIds") : new java.util.ArrayList()); }
     public int getOfflineLicenseState(byte[] p0) { return 0; }
     public int getOpenSessionCount() { return (huskProps.get("OpenSessionCount") instanceof Integer ? (Integer) huskProps.get("OpenSessionCount") : 0); }
     public android.media.MediaDrm.PlaybackComponent getPlaybackComponent(byte[] p0) { return null; }
-    public byte[] getPropertyByteArray(java.lang.String p0) { return null; }
-    public java.lang.String getPropertyString(java.lang.String p0) { return null; }
+    public byte[] getPropertyByteArray(java.lang.String p0) { return PROPERTY_DEVICE_UNIQUE_ID.equals(p0) ? new byte[16] : null; }
+    public java.lang.String getPropertyString(java.lang.String p0) { return PROPERTY_VENDOR.equals(p0) ? "DroidRun" : PROPERTY_VERSION.equals(p0) ? "1.0" : PROPERTY_DESCRIPTION.equals(p0) ? "ClearKey CDM" : ""; }
     public android.media.MediaDrm.ProvisionRequest getProvisionRequest() { return (android.media.MediaDrm.ProvisionRequest) huskProps.get("ProvisionRequest"); }
     public byte[] getSecureStop(byte[] p0) { return null; }
     public java.util.List getSecureStopIds() { return (huskProps.get("SecureStopIds") != null ? (java.util.List) huskProps.get("SecureStopIds") : new java.util.ArrayList()); }
     public java.util.List getSecureStops() { return (huskProps.get("SecureStops") != null ? (java.util.List) huskProps.get("SecureStops") : new java.util.ArrayList()); }
-    public int getSecurityLevel(byte[] p0) { return 0; }
+    public int getSecurityLevel(byte[] p0) { return SECURITY_LEVEL_SW_SECURE_CRYPTO; }
     public void native_release() {}
-    public byte[] openSession() { return null; }
-    public byte[] openSession(int p0) { return null; }
+    public byte[] openSession() { return husk.ClearKey.openSession(); }
+    public byte[] openSession(int p0) { return husk.ClearKey.openSession(); }
     public android.media.MediaDrm.Certificate provideCertificateResponse(byte[] p0) { return null; }
-    public byte[] provideKeyResponse(byte[] p0, byte[] p1) { return null; }
+    public byte[] provideKeyResponse(byte[] p0, byte[] p1) throws android.media.DeniedByServerException {
+        try { husk.ClearKey.keyResponse(p0, p1); } catch (Exception e) { throw new android.media.DeniedByServerException("ClearKey license: " + e); }
+        return new byte[0];
+    }
     public void provideProvisionResponse(byte[] p0) {}
-    public java.util.HashMap queryKeyStatus(byte[] p0) { return null; }
+    public java.util.HashMap queryKeyStatus(byte[] p0) { return husk.ClearKey.keyStatus(p0); }
     public void release() {}
     public void releaseAllSecureStops() {}
     public void releaseSecureStops(byte[] p0) {}
@@ -98,7 +110,7 @@ public final class MediaDrm implements java.lang.AutoCloseable {
     public void setPropertyByteArray(java.lang.String p0, byte[] p1) {}
     public void setPropertyString(java.lang.String p0, java.lang.String p1) {}
     public byte[] signRSA(byte[] p0, java.lang.String p1, byte[] p2, byte[] p3) { return null; }
-    MediaDrm() { this((java.util.UUID) null); }
+    MediaDrm() { huskScheme = null; }
     public static final class Certificate {
         private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
         public byte[] getContent() { return (byte[]) huskProps.get("Content"); }

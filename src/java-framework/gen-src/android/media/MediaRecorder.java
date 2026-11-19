@@ -35,7 +35,7 @@ public class MediaRecorder implements android.media.AudioRouting, android.media.
     public android.media.AudioRecordingConfiguration getActiveRecordingConfiguration() { return (android.media.AudioRecordingConfiguration) huskProps.get("ActiveRecordingConfiguration"); }
     public android.media.metrics.LogSessionId getLogSessionId() { return (android.media.metrics.LogSessionId) huskProps.get("LogSessionId"); }
     public int getMaxAmplitude() { return (huskProps.get("MaxAmplitude") instanceof Integer ? (Integer) huskProps.get("MaxAmplitude") : 0); }
-    public android.os.PersistableBundle getMetrics() { return (android.os.PersistableBundle) huskProps.get("Metrics"); }
+    public android.os.PersistableBundle getMetrics() { Object m = huskProps.get("Metrics"); return m != null ? (android.os.PersistableBundle) m : new android.os.PersistableBundle(); }   /* never null on Android */
     public int getPortId() { return (huskProps.get("PortId") instanceof Integer ? (Integer) huskProps.get("PortId") : 0); }
     public android.media.AudioDeviceInfo getPreferredDevice() { return (android.media.AudioDeviceInfo) huskProps.get("PreferredDevice"); }
     public android.media.AudioDeviceInfo getRoutedDevice() { return (android.media.AudioDeviceInfo) huskProps.get("RoutedDevice"); }

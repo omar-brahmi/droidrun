@@ -79,7 +79,7 @@ public class AudioRecord implements AudioRouting {
     public java.util.List getActiveMicrophones() { return new java.util.ArrayList(); }
     public android.media.AudioRecordingConfiguration getActiveRecordingConfiguration() { return null; }
     public android.media.metrics.LogSessionId getLogSessionId() { Object v = huskFill.get("LogSessionId"); return v != null ? (android.media.metrics.LogSessionId) v : android.media.metrics.LogSessionId.LOG_SESSION_ID_NONE; }
-    public android.os.PersistableBundle getMetrics() { return null; }
+    public android.os.PersistableBundle getMetrics() { return new android.os.PersistableBundle(); }   /* never null on Android */
     public int getNotificationMarkerPosition() { return 0; }
     public int getPortId() { return 0; }
     public int getPositionNotificationPeriod() { return 0; }
