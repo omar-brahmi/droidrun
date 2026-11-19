@@ -5,7 +5,9 @@
 #   - this repository's Java framework (packager/runtime/*.dex),
 #   - compiled Dalvik methods (dexc-v*-<dex signature>.dylib): the hot methods of the APKs and of the boot class path,
 #   - the home-screen name "DroidRun".
-# Output: the "DroidRun-ipa" artifact. Install it with Sideloadly.
+# The user's own APKs come from a private repository (.github/actions/private-apks, secret APKS_DEPLOY_KEY); whatever carries
+# them leaves the runners locked with the ARTIFACT_KEY secret (packager/lock.sh), since this repository is public.
+# Output: the "DroidRun-ipa" artifact, DroidRun-ipa.lock: unlock it on the PC (packager/lock.sh), install with Sideloadly.
 #
 # Manual start only (Actions > Build DroidRun IPA > Run workflow): macOS minutes count 10x on private repositories.
 name: Build DroidRun IPA
@@ -92,6 +94,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: ./.github/actions/private-apks
+        with:
+          deploy-key: ${{ secrets.APKS_DEPLOY_KEY }}
+
       - name: Build converter (elf2macho-test)
         run: |
           bash tools/regress/build.sh tools/elf2macho-test.c "$GITHUB_WORKSPACE/elf2macho-test" 2>&1 | grep -E "error|warning: implicit" || true
@@ -103,23 +109,29 @@ jobs:
         run: gh release download "$HUSK_RELEASE" -R "$HUSK_REPO" -p Husk.ipa -D dl
 
       - name: Collect libraries
-        run: python3 packager/collect.py dl/Husk.ipa packager/input libs
+        run: python3 packager/collect.py dl/Husk.ipa packager/input libs > /dev/null
 
       - name: Convert
         run: |
           mkdir -p out
           fail=0
           while IFS= read -r so; do
-            if ./elf2macho-test "$so" out/ --ios; then :; else echo "::warning::failed: $so"; fail=$((fail+1)); fi
+            ./elf2macho-test "$so" out/ --ios > /dev/null 2>&1 || fail=$((fail+1))
           done < <(find libs -name '*.so' | sort)
           echo "converted: $(ls out | wc -l), failed: $fail"
           test "$(ls out | wc -l)" -gt 0
 
+      # converted from the user's apps too: locked (packager/lock.sh)
+      - name: Lock
+        env:
+          ARTIFACT_KEY: ${{ secrets.ARTIFACT_KEY }}
+        run: bash packager/lock.sh lock out dylibs.lock
+
       - uses: actions/upload-artifact@v4
         with:
           name: dylibs
-          path: out/*.dylib
-          retention-days: 7
+          path: dylibs.lock
+          retention-days: 3
 
   # The dex compiler: each APK in packager/input runs on the Mac harness for a while, interpreted, counting its methods' calls
   # (TL_DVM_PROFILE); the hot ones -- in the APKs and in the boot class path every app runs (libcore, the framework) -- are
@@ -128,6 +140,10 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/private-apks
+        with:
+          deploy-key: ${{ secrets.APKS_DEPLOY_KEY }}
 
       - uses: ./.github/actions/mac-harness
         with:
@@ -139,10 +155,7 @@ jobs:
           AAPT2=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -1)
           for apk in packager/input/*.apk; do
             pkg=$([ -n "$AAPT2" ] && "$AAPT2" dump packagename "$apk" 2>/dev/null || true)
-            echo "== $apk ($pkg)"
-            TL_PACKAGE="$pkg" TL_DEXC=0 TL_DVM_PROFILE="$GITHUB_WORKSPACE/out/p-$(basename "$apk").txt" \
-              ./javaapp-test "$apk" ${{ inputs.profile_seconds }} 856 1852 > "out/$(basename "$apk").log" 2>&1 || true
-            wc -l < "out/p-$(basename "$apk").txt" 2>/dev/null || echo "no profile"
+            TL_PACKAGE="$pkg" TL_DEXC=0 TL_DVM_PROFILE="$GITHUB_WORKSPACE/out/p-$(basename "$apk").txt"               ./javaapp-test "$apk" ${{ inputs.profile_seconds }} 856 1852 > "out/$(basename "$apk").log" 2>&1 || true
           done
           cat out/p-*.txt > out/profile.txt 2>/dev/null || true
           echo "hot methods: $(wc -l < out/profile.txt)"
@@ -150,27 +163,38 @@ jobs:
       - name: Compile hot methods
         run: |
           for f in packager/input/*.apk "$TL_FRAMEWORK" "$TL_FRAMEWORK_CORE" "$TL_ART"/javalib/*.jar; do
-            python3 tools/dexc/dexc.py "$f" dexc-gen --profile out/profile.txt --max 6000
+            python3 tools/dexc/dexc.py "$f" dexc-gen --profile out/profile.txt --max 6000 | sed 's/^[^:]*: /dex: /'
           done
-          bash tools/dexc/build.sh dexc-gen dexc-out ios
-          ls -la dexc-out
+          bash tools/dexc/build.sh dexc-gen dexc-out ios > /dev/null
+          echo "compiled dylibs: $(ls dexc-out | wc -l)"
+
+      # the user's apps' code and logs: locked (packager/lock.sh)
+      - name: Lock
+        if: always()
+        env:
+          ARTIFACT_KEY: ${{ secrets.ARTIFACT_KEY }}
+        run: |
+          bash packager/lock.sh lock dexc-out dexc.lock
+          bash packager/lock.sh lock out dexc-profile.lock
 
       - uses: actions/upload-artifact@v4
         with:
           name: dexc
-          path: dexc-out/*.dylib
-          retention-days: 7
+          path: dexc.lock
+          retention-days: 3
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: dexc-profile
-          path: out/
+          path: dexc-profile.lock
           retention-days: 7
 
   ipa:
     needs: [app, dylibs, dexc]
     runs-on: ubuntu-latest
+    env:
+      ARTIFACT_KEY: ${{ secrets.ARTIFACT_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -185,13 +209,15 @@ jobs:
 
       - name: Pack
         run: |
-          cp art/dexc/*.dylib art/dylibs/ 2>/dev/null || echo "no compiled methods"
-          python3 packager/pack.py dl/Husk.ipa art/dylibs DroidRun.ipa \
-            --app art/app --runtime packager/runtime --name "${{ inputs.name }}"
+          bash packager/lock.sh unlock art/dylibs/dylibs.lock lib
+          bash packager/lock.sh unlock art/dexc/dexc.lock lib
+          cp lib/dexc-out/*.dylib lib/out/ 2>/dev/null || echo "no compiled methods"
+          python3 packager/pack.py dl/Husk.ipa lib/out DroidRun.ipa             --app art/app --runtime packager/runtime --name "${{ inputs.name }}" | tail -2
+          bash packager/lock.sh lock DroidRun.ipa DroidRun-ipa.lock
 
       - uses: actions/upload-artifact@v4
         with:
           name: DroidRun-ipa
-          path: DroidRun.ipa
+          path: DroidRun-ipa.lock
           compression-level: 0
           retention-days: 30

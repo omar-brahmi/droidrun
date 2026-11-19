@@ -34,3 +34,11 @@ third_party/gpu/
 packager/dylibs/
 packager/exe/
 __pycache__/
+
+# the user's own APKs live in a private repository (.github/actions/private-apks); only the test apps are here
+packager/input/*.apk
+!packager/input/AvTest.apk
+!packager/input/DroidRunBench.apk
+# the key that unlocks workflow artifacts (packager/lock.sh)
+.artifact-key
+*.lock

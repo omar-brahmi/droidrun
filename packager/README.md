@@ -2,16 +2,25 @@
 
 Builds DroidRun.ipa, which runs Android apps on an iPhone **without JIT**: no StikDebug, no pairing file, no LocalDevVPN.
 
-Android native libraries (`.so`) are converted to iOS dylibs on a GitHub macOS runner before install. The dylibs go into
-`Husk.app/Frameworks`, so the sideloader signs them together with the app and iOS accepts them.
+Android native libraries (`.so`) are converted to iOS dylibs on a GitHub macOS runner before install, and the apps' hot Java
+methods are compiled ahead of time (`tools/dexc`). The dylibs go into `DroidRun.app/Frameworks`, so the sideloader signs them
+together with the app and iOS accepts them.
+
+## Your own APKs
+
+This repository is public, so it holds only its own test apps. Your APKs live in a private repository, which the workflows
+read through a read-only deploy key (secret `APKS_DEPLOY_KEY`, `.github/actions/private-apks`). Everything made from them
+(the IPA, logs, screenshots) leaves the runners locked with the secret `ARTIFACT_KEY` (`lock.sh`); the same key, in
+`.artifact-key` on the PC (git ignores it), unlocks it.
 
 ## Use
 
-1. Put the APK into `packager/input/` and push.
-2. On GitHub: **Actions > Build DroidRun IPA > Run workflow**. It takes about 25 minutes.
-3. Download the `DroidRun-ipa` artifact from the run page, or on the PC:
+1. Put the APK into the private repository's `input/` and push it there.
+2. On GitHub: **Actions > Build DroidRun IPA > Run workflow**. It takes about 30 minutes.
+3. Download and unlock on the PC, in this repository's folder:
    ```
    gh run download -n DroidRun-ipa
+   ARTIFACT_KEY=$(cat .artifact-key) bash packager/lock.sh unlock DroidRun-ipa.lock .
    ```
 4. Install `DroidRun.ipa` with Sideloadly.
 5. On the iPhone: Settings > JIT & Sideload > turn **Play without JIT** on. Import the APK and start it.
@@ -20,21 +29,16 @@ Android native libraries (`.so`) are converted to iOS dylibs on a GitHub macOS r
 
 | Path | What |
 |---|---|
-| `input/` | APKs whose native libraries are converted. `AvTest.apk` is the video bench app (`testapp/`). |
+| `input/` | The test apps: `AvTest.apk` (video, `testapp/`), `DroidRunBench.apk` (CPU benchmark, `benchapp/`). Your APKs are added at build time. |
 | `runtime/` | The Java framework built from `src/java-framework` (`husk-framework.dex`, `husk-framework-core.dex`). |
 | `collect.py` | Gathers the `.so` files from the base IPA and the APKs for the converter. |
-| `pack.py` | Puts the executable, the dylibs, the framework and the app name into the IPA. Runs on any PC. |
-
-Pack by hand on the PC, with artifacts from the workflow:
-
-```
-python pack.py Husk.ipa dylibs DroidRun.ipa --app DroidRun.app --runtime runtime
-```
+| `pack.py` | Puts the app bundle, the dylibs, the framework and the app name into the IPA. Runs on any PC. |
+| `lock.sh` | Locks and unlocks workflow artifacts (AES-256). |
 
 ## Limits
 
 - The base is the official Husk 3.4 IPA (commit `29abb51`). The dylib names carry the converter's version and each
-  library's hash, so a mismatch is ignored, not loaded.
+  library's (or DEX file's) hash, so a mismatch is ignored, not loaded.
 - Code generated while the app runs (LuaJIT, Mono JIT) still needs JIT.
 - The app is `DroidRun.app` with the identifier `com.droidrun.app`, so it installs next to Husk, not over it. The
   base's app extensions (JIT helper, downloads widget) are left out.

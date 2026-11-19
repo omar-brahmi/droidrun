@@ -1,0 +1,28 @@
+# The user's own APKs are not in this public repository: they come from the private repository named here, through a read-only
+# deploy key, into packager/input next to the repository's own test apps. Without the key nothing is added.
+name: Private APKs
+description: Copy the APKs of a private repository into packager/input
+inputs:
+  deploy-key:
+    description: SSH deploy key (read-only) of the private repository
+    default: ""
+  repository:
+    default: omar-brahmi/husk-packager
+runs:
+  using: composite
+  steps:
+    - if: inputs.deploy-key != ''
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.repository }}
+        ssh-key: ${{ inputs.deploy-key }}
+        path: .private-apks
+    - shell: bash
+      run: |
+        if [ -d .private-apks/input ]; then
+          n=0; for f in .private-apks/input/*.apk; do [ -e "packager/input/$(basename "$f")" ] || { cp "$f" packager/input/; n=$((n+1)); }; done
+          echo "private APKs added: $n"
+          rm -rf .private-apks
+        else
+          echo "no private APKs (APKS_DEPLOY_KEY not set)"
+        fi

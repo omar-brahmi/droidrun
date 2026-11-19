@@ -1,6 +1,6 @@
 # Runs an APK from packager/input/ on a GitHub macOS runner with the Mac harness (tools/javaapp-test.c) built from this repository:
 # the bench for engine changes (the garbage collector) before they reach a phone. Output: the log, the memory curve (RSS every
-# 2 s) and a screenshot, as the "app-test" artifact.
+# 2 s) and a screenshot, as the "app-test" artifact (locked: packager/lock.sh).
 name: Test app on Mac
 
 on:
@@ -35,6 +35,10 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/private-apks
+        with:
+          deploy-key: ${{ secrets.APKS_DEPLOY_KEY }}
 
       - uses: ./.github/actions/mac-harness
         with:
@@ -74,7 +78,7 @@ jobs:
             opts="${opts/--profile-run/} --profile out/profile.txt"
             TL_DEXC=0 TL_DVM_PROFILE="$GITHUB_WORKSPACE/out/profile.txt" TL_CTL=/dev/null \
               ./javaapp-test "packager/input/${{ inputs.apk }}" ${{ inputs.seconds }} 856 1852 > out/profile-run.log 2>&1 || true
-            echo "hot methods: $(wc -l < out/profile.txt)"; sort -k3 -n -r out/profile.txt | head -20
+            echo "hot methods: $(wc -l < out/profile.txt)"
             inputs="$inputs $TL_FRAMEWORK $TL_FRAMEWORK_CORE $(ls "$TL_ART"/javalib/*.jar 2>/dev/null)"
           fi
           for f in $inputs; do python3 tools/dexc/dexc.py "$f" dexc-gen $opts; done
@@ -89,6 +93,9 @@ jobs:
           cat ctl.txt
           export TL_CTL="$GITHUB_WORKSPACE/ctl.txt"
           for kv in ${{ inputs.env }}; do export "$kv"; done
+          # the repository's own test apps print their logs here; the user's apps (from the private repository) only into the
+          # locked artifact, since this log is public
+          own=0; git ls-files --error-unmatch "packager/input/${{ inputs.apk }}" >/dev/null 2>&1 && own=1
           # with dexc: once interpreted, once with the compiled methods, to compare (the Bench lines carry times and checksums)
           if [ -n "${{ inputs.dexc }}" ]; then modes="interpreted compiled"; else modes="app"; fi
           for mode in $modes; do
@@ -103,14 +110,23 @@ jobs:
             done
             wait $PID; echo "exit: $?" | tee -a $log
             echo "== $mode: memory (time, RSS KiB, VM total)"; awk 'NR%5==1' out/memory-$mode.txt
-            echo "== $mode: log tail"; tail -40 $log
-            grep -E "Bench|dvmc:" $log || true
-            grep -cE "FATAL|CRASH" $log || true
+            if [ $own = 1 ]; then
+              echo "== $mode: log tail"; tail -40 $log
+              grep -E "Bench|dvmc:" $log || true
+            fi
+            echo "crash lines: $(grep -cE "FATAL|CRASH" $log || true)"
           done
+
+      # logs and screenshots of the user's apps: locked (packager/lock.sh)
+      - name: Lock
+        if: always()
+        env:
+          ARTIFACT_KEY: ${{ secrets.ARTIFACT_KEY }}
+        run: bash packager/lock.sh lock out app-test.lock
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: app-test
-          path: out/
+          path: app-test.lock
           retention-days: 14
