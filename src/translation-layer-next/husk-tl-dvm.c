@@ -1574,6 +1574,7 @@ static bool invoke_words(dvm_method *caller, int kind, uint32_t midx, const uint
     if (site && (!had || had->gen != g_dvmc_gen) && (kind != 3 || target->cls->state == CS_INITIALIZED) && (!self || self->kind != TL_K_CLASS)) {
         dvmc_target *t = malloc(sizeof(*t));
         t->gen = g_dvmc_gen; t->m = target; t->rcls = (kind == 0 || kind == 4) ? (const void *)self->cls : NULL;
+        t->fn = target->compiled;
         /* a stale one (an app dropped since) stays allocated: another thread may be reading it */
         if (!__atomic_compare_exchange_n(&site->t, &had, t, false, __ATOMIC_RELEASE, __ATOMIC_RELAXED)) free(t);
     }
@@ -1692,6 +1693,25 @@ static bool varhandle(const char *mode, const char *shorty, jobj *vh, const uint
     }
     result->j = (int64_t)from_bits(type, out);
     return true;
+}
+
+/* invoke-polymorphic: vals[0..count) the registers' values, the receiver first; proto the call site's. VarHandle accesses only. */
+static bool invoke_polymorphic(dvm_method *m, uint32_t midx, uint32_t proto, const uint64_t *vals, int count, jvalue *result)
+{
+    (void)count;
+    dvm_dex *dex = m->cls->dex;
+    const uint8_t *mi = dex->b + dex->meth_off + 8 * midx;
+    const char *mname = dex_str(dex, rd32(mi + 4));
+    tl_jclass *owner = resolve_type(dex, rd16(mi));
+    char csig[8192], cshorty[300]; int np;
+    proto_sig(dex, proto, csig, sizeof(csig), cshorty, sizeof(cshorty), &np);
+    jobj *recv = (jobj *)(uintptr_t)vals[0];
+    if (!recv) return dvm_throw("java/lang/NullPointerException", "invoke-polymorphic on null");
+    /* wide arguments take two registers; pack one value per parameter */
+    uint64_t args[64]; int k = 1;
+    for (int i = 0; i < np && i < 63; i++) { args[i] = vals[k]; k += (cshorty[1 + i] == 'J' || cshorty[1 + i] == 'D') ? 2 : 1; }
+    if (!strcmp(owner->name, "java/lang/invoke/VarHandle")) return varhandle(mname, cshorty, recv, args, result);
+    return dvm_throw("java/lang/UnsupportedOperationException", "MethodHandle.%s is not supported yet (in %s.%s)", mname, m->cls->name, m->name);
 }
 
 #define FETCH(n) (insns[pc + (n)])
@@ -2078,23 +2098,8 @@ dispatch:;
             uint16_t list = FETCH(2);
             uint64_t vals[256];
             for (int i = 0; i < count && i < 256; i++) vals[i] = regs[range ? list + i : (i < 4 ? (list >> (4 * i)) & 0xF : A4)];
-            const uint8_t *mi = dex->b + dex->meth_off + 8 * FETCH(1);
-            const char *mname = dex_str(dex, rd32(mi + 4));
-            tl_jclass *owner = resolve_type(dex, rd16(mi));
-            char csig[8192], cshorty[300]; int np;
-            proto_sig(dex, FETCH(3), csig, sizeof(csig), cshorty, sizeof(cshorty), &np);
-            jobj *recv = (jobj *)(uintptr_t)vals[0];
-            if (!recv) { dvm_throw("java/lang/NullPointerException", "invoke-polymorphic on null"); goto exception; }
-            /* wide arguments take two registers; pack one value per parameter */
-            uint64_t args[64]; int k = 1;
-            for (int i = 0; i < np && i < 63; i++) { args[i] = vals[k]; k += (cshorty[1 + i] == 'J' || cshorty[1 + i] == 'D') ? 2 : 1; }
             result.j = 0;
-            if (!strcmp(owner->name, "java/lang/invoke/VarHandle")) {
-                if (!varhandle(mname, cshorty, recv, args, &result)) goto exception;
-            } else {
-                dvm_throw("java/lang/UnsupportedOperationException", "MethodHandle.%s is not supported yet (in %s.%s)", mname, m->cls->name, m->name);
-                goto exception;
-            }
+            if (!invoke_polymorphic(m, FETCH(1), FETCH(3), vals, count, &result)) goto exception;
             NEXT(4);
         }
         if (op >= 0xfc && op <= 0xfd) { dvm_throw("java/lang/UnsupportedOperationException", "invoke-custom in %s.%s is not supported yet", m->cls->name, m->name); goto exception; }
@@ -2304,6 +2309,56 @@ static jobj *c_sync_enter(dvm_method *m, uint64_t *regs)
     return o;
 }
 
+static bool c_enter(dvm_method *callee, uint32_t caller_pc)
+{
+    if (t_depth > 0 && t_depth <= 8192) t_pcs[t_depth - 1] = caller_pc;
+    return frame_enter(callee);
+}
+
+static void c_leave(void) { frame_leave(); }
+static void c_at(uint32_t pc) { if (t_depth > 0 && t_depth <= 8192) t_pcs[t_depth - 1] = pc; }
+
+/* String.length(): the characters' count (what the count field says, see iget); -1 for what is not a plain string, which
+ * then takes the ordinary call */
+static int32_t c_string_length(jobj *s)
+{
+    if (s->kind != TL_K_STRING) return -1;
+    int32_t n; tl_dvm_string_chars(s, &n);
+    return n;
+}
+
+static bool c_string_char_at(jobj *s, int32_t i, uint64_t *out)
+{
+    static dvm_native_fn f;
+    if (!f) f = dvm_intrinsic("java/lang/String", "charAt", "(I)C");
+    jvalue a, r; a.j = 0; a.i = i; r.j = 0;
+    if (!f(s, &a, &r)) return false;
+    *out = r.c;
+    return true;
+}
+
+static bool c_arraycopy(jobj *src, int32_t sp, jobj *dst, int32_t dp, int32_t n)
+{
+    static dvm_native_fn f;
+    if (!f) f = dvm_intrinsic("java/lang/System", "arraycopy", "(Ljava/lang/Object;ILjava/lang/Object;II)V");
+    jvalue a[5], r; memset(a, 0, sizeof(a)); r.j = 0;
+    a[0].l = src; a[1].i = sp; a[2].l = dst; a[3].i = dp; a[4].i = n;
+    return f(NULL, a, &r);
+}
+
+static bool c_invoke_polymorphic(dvm_method *m, uint32_t pc, uint32_t midx, uint32_t proto, const uint64_t *w, int n, jvalue *result)
+{
+    c_at(pc);
+    result->j = 0;
+    return invoke_polymorphic(m, midx, proto, w, n, result);
+}
+
+static bool c_throw_unsupported(dvm_method *m, int op)
+{
+    if (op == 0xfc || op == 0xfd) return dvm_throw("java/lang/UnsupportedOperationException", "invoke-custom in %s.%s is not supported yet", m->cls->name, m->name);
+    return dvm_throw("java/lang/UnsupportedOperationException", "const-method-handle/type");
+}
+
 static const dvmc_api g_dvmc_api = {
     .version = DVMC_VERSION, .gen = &g_dvmc_gen,
     .invoke = c_invoke, .field = c_field, .const_string = c_const_string, .const_class = c_const_class,
@@ -2312,6 +2367,8 @@ static const dvmc_api g_dvmc_api = {
     .monitor_enter = c_monitor_enter, .monitor_exit = c_monitor_exit, .throw_obj = c_throw_obj, .throw_npe = c_throw_npe,
     .throw_index = c_throw_index, .throw_div_zero = c_throw_div_zero, .throw_neg_size = c_throw_neg_size,
     .handler = c_handler, .sync_enter = c_sync_enter, .call_words = call_words,
+    .enter = c_enter, .leave = c_leave, .at = c_at, .string_length = c_string_length, .string_char_at = c_string_char_at,
+    .arraycopy = c_arraycopy, .invoke_polymorphic = c_invoke_polymorphic, .throw_unsupported = c_throw_unsupported,
 };
 
 const dvmc_api *dvm_compiled_api(void) { return &g_dvmc_api; }
@@ -2464,6 +2521,7 @@ static bool forget_app_class(tl_jclass *jc, void *user)
 void tl_dvm_drop_app(void)
 {
     if (!g_running || g_nboot_dex < 0) return;
+    dvmc_profile_drop_app();
     tl_jni_forget_if(forget_app_class, NULL);
     for (int b = 0; b < CBUCKETS; b++) {
         cdef **pp = &g_cdefs[b];

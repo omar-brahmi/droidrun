@@ -124,6 +124,7 @@ const struct dvmc_api *dvm_compiled_api(void);          /* what a compiled metho
 void dvmc_dex_added(dvm_dex *d);                        /* find and bind the dylib compiled from this DEX file, if any */
 void *dvmc_lookup(const dvm_dex *d, uint32_t midx);     /* the compiled function of that method, or NULL */
 void dvmc_count_call(dvm_method *m);                    /* TL_DVM_PROFILE: count the call, for the compiler's method list */
+void dvmc_profile_drop_app(void);                       /* before the app's classes go: keep their counts, forget them */
 
 /* ---- the natives (husk-tl-dvm-natives.c) */
 dvm_native_fn dvm_intrinsic(const char *cls, const char *name, const char *sig);

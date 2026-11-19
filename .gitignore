@@ -42,3 +42,4 @@ packager/input/*.apk
 # the key that unlocks workflow artifacts (packager/lock.sh)
 .artifact-key
 *.lock
+packager/profiles/

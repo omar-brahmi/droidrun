@@ -21,7 +21,7 @@
 
 #include "husk-tl-jni.h"
 
-#define DVMC_VERSION 2
+#define DVMC_VERSION 3
 
 struct dvm_method;
 
@@ -46,6 +46,7 @@ typedef struct dvmc_target {
     uint32_t gen;
     const void *rcls;                   /* virtual and interface calls: the receiver's class (jobj.cls) it holds for; else NULL */
     struct dvm_method *m;
+    dvmc_fn fn;                         /* m's compiled function, or NULL: the site calls it directly when it is one it knows */
 } dvmc_target;
 
 typedef struct dvmc_site { const dvmc_target *t; } dvmc_site;
@@ -82,6 +83,18 @@ typedef struct dvmc_api {
     bool (*handler)(struct dvm_method *m, uint32_t pc, uint32_t *target, jobj **caught);
     /* a synchronized method: enters the monitor of its class or of this (regs as the method got them); monitor_exit leaves it */
     jobj *(*sync_enter)(struct dvm_method *m, uint64_t *regs);
+    /* a direct call of a compiled method: its frame on the Java stack (false: StackOverflowError thrown, nothing pushed), and off.
+     * Methods that call nothing are called without one. */
+    bool (*enter)(struct dvm_method *callee, uint32_t caller_pc);
+    void (*leave)(void);
+    void (*at)(uint32_t pc);            /* the instruction about to throw, for the stack trace's line number */
+    /* String.length() and String.charAt(int) of a non-null string; char_at false: StringIndexOutOfBoundsException thrown */
+    int32_t (*string_length)(jobj *s);
+    bool (*string_char_at)(jobj *s, int32_t i, uint64_t *out);
+    bool (*arraycopy)(jobj *src, int32_t sp, jobj *dst, int32_t dp, int32_t n);     /* System.arraycopy */
+    /* invoke-polymorphic(/range) with its registers' values (the receiver first), and the call site's proto */
+    bool (*invoke_polymorphic)(struct dvm_method *m, uint32_t pc, uint32_t midx, uint32_t proto, const uint64_t *w, int n, jvalue *result);
+    bool (*throw_unsupported)(struct dvm_method *m, int op);   /* invoke-custom, const-method-handle/type: as the interpreter */
 } dvmc_api;
 
 typedef struct dvmc_entry { uint32_t midx; dvmc_fn fn; } dvmc_entry;

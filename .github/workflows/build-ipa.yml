@@ -157,7 +157,9 @@ jobs:
             pkg=$([ -n "$AAPT2" ] && "$AAPT2" dump packagename "$apk" 2>/dev/null || true)
             TL_PACKAGE="$pkg" TL_DEXC=0 TL_DVM_PROFILE="$GITHUB_WORKSPACE/out/p-$(basename "$apk").txt"               ./javaapp-test "$apk" ${{ inputs.profile_seconds }} 856 1852 > "out/$(basename "$apk").log" 2>&1 || true
           done
-          cat out/p-*.txt > out/profile.txt 2>/dev/null || true
+          # with what the iPhone recorded (Settings › Compiled Code › Record Hot Methods), which covers what the apps do
+          # after their start: the Mac run only opens them
+          cat out/p-*.txt packager/profiles/*.txt > out/profile.txt 2>/dev/null || true
           echo "hot methods: $(wc -l < out/profile.txt)"
 
       - name: Compile hot methods

@@ -1,7 +1,7 @@
 # The user's own APKs are not in this public repository: they come from the private repository named here, through a read-only
 # deploy key, into packager/input next to the repository's own test apps. Without the key nothing is added.
 name: Private APKs
-description: Copy the APKs of a private repository into packager/input
+description: Copy the APKs (input/) and iPhone hot-method recordings (profiles/) of a private repository into packager/
 inputs:
   deploy-key:
     description: SSH deploy key (read-only) of the private repository
@@ -22,6 +22,10 @@ runs:
         if [ -d .private-apks/input ]; then
           n=0; for f in .private-apks/input/*.apk; do [ -e "packager/input/$(basename "$f")" ] || { cp "$f" packager/input/; n=$((n+1)); }; done
           echo "private APKs added: $n"
+          # hot-method recordings from the iPhone (Settings › Compiled Code), for the dex compiler
+          mkdir -p packager/profiles
+          cp .private-apks/profiles/*.txt packager/profiles/ 2>/dev/null || true
+          echo "iPhone recordings: $(ls packager/profiles | wc -l)"
           rm -rf .private-apks
         else
           echo "no private APKs (APKS_DEPLOY_KEY not set)"

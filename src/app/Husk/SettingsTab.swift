@@ -26,6 +26,7 @@ struct SettingsTab: View {
                 Section("JIT") {
                     row(JITSettings(), "bolt.fill", .yellow, "JIT & Sideload", "StikJIT is built in — the recommended way")
                     row(JITLessSettings(), "bolt.slash.fill", .mint, "Play without JIT", "No debugger")
+                    row(CompiledCodeSettings(), "hare.fill", .green, "Compiled Code", "Faster Java apps")
                 }
 
                 Section("General") {

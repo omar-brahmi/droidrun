@@ -12,7 +12,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        new Thread(new Runnable() { public void run() { Bench.all(); } }, "bench").start();
+        new Thread(new Runnable() { public void run() { Ops.all(); Bench.all(); } }, "bench").start();
     }
 }
 

@@ -18,7 +18,7 @@ import struct
 import sys
 import zipfile
 
-DVMC_VERSION = 2
+DVMC_VERSION = 3
 
 # ---------------------------------------------------------------- DEX reading
 
@@ -152,7 +152,8 @@ fmt([0xfa], '45cc'); fmt([0xfb], '4rcc')
 SIZE = {'10x': 1, '12x': 1, '11n': 1, '11x': 1, '10t': 1, '20t': 2, '22x': 2, '21t': 2, '21s': 2, '21h': 2, '21c': 2, '23x': 2,
         '22b': 2, '22t': 2, '22s': 2, '22c': 2, '30t': 3, '32x': 3, '31i': 3, '31t': 3, '31c': 3, '35c': 3, '3rc': 3,
         '45cc': 4, '4rcc': 4, '51l': 5}
-UNSUPPORTED = set([0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff, 0x73, 0x79, 0x7a] + list(range(0x3e, 0x44)) + list(range(0xe3, 0xfa)))
+UNSUPPORTED = set([0x73, 0x79, 0x7a] + list(range(0x3e, 0x44)) + list(range(0xe3, 0xfa)))
+INVOKES = set(range(0x6e, 0x73)) | set(range(0x74, 0x79)) | {0xfa, 0xfb, 0xfc, 0xfd}
 
 
 class Unsupported(Exception):
@@ -296,9 +297,18 @@ def binop(op, k, a, b):
     return f'{W}({R}({a}) {op} {R}({b}))', False
 
 
-class Gen:
+class Callee:
+    """A method this dylib compiles, as a call site sees it: its frame, and whether it calls anything (a leaf runs without a
+    frame on the Java stack, so a call into it can be inlined whole)."""
     def __init__(self, m):
+        self.regs, self.ins = m.regs, m.ins
+        self.leaf = not any(op in INVOKES for _, op, _ in m.walk())
+
+
+class Gen:
+    def __init__(self, m, module=None):
         self.m = m
+        self.module = module or {}
         self.out = []
         self.targets = set()
         self.has_exc = bool(m.tries)
@@ -309,6 +319,9 @@ class Gen:
         if n >= self.m.regs:
             raise Unsupported(f'register v{n} past {self.m.regs}')
         return f'v{n}'
+
+    def at(self, pc):
+        return f'A->at({pc}u); '
 
     def fail(self, pc):
         """what follows a failed step at pc: its handler, or out"""
@@ -349,6 +362,34 @@ class Gen:
         tail += ['        default: A->throw_obj(c); break; } }', '}', 'FAIL:', '    if (sync) A->monitor_exit(sync);',
                  '    return false;', 'DONE:', '    if (sync) A->monitor_exit(sync);', '    return true;', '}']
         return '\n'.join(head + body + tail) + '\n'
+
+    def fast_path(self, cls, name, proto, kind, regs, pc, F):
+        """C for a call to a library method that is cheaper inline: String.length/charAt, System.arraycopy, Math. Taken once
+        the site resolved (its class initialized), as the method would have done."""
+        ps, ret = proto
+        sig = f'{cls}.{name}({"".join(ps)}){ret}'
+        a = [f'w[{i}]' for i in range(len(regs))]
+        if sig == 'Ljava/lang/String;.length()I' and kind == 0:
+            return (f'int32_t n = A->string_length(RL(w[0])); '
+                    f'if (n >= 0) res.j = (uint32_t)n; else if (!A->call_words(t->m, {pc}u, w, 1, &res)) {F}')
+        if sig == 'Ljava/lang/String;.charAt(I)C' and kind == 0:
+            return (f'if (RL(w[0])->kind == TL_K_STRING) {{ uint64_t c; {self.at(pc)}if (!A->string_char_at(RL(w[0]), RI(w[1]), &c)) {F} res.j = c; }} '
+                    f'else if (!A->call_words(t->m, {pc}u, w, 2, &res)) {F}')
+        if sig == 'Ljava/lang/System;.arraycopy(Ljava/lang/Object;ILjava/lang/Object;II)V' and kind == 3:
+            return f'{self.at(pc)}if (!A->arraycopy(RL(w[0]), RI(w[1]), RL(w[2]), RI(w[3]), RI(w[4]))) {F} res.j = 0;'
+        if cls == 'Ljava/lang/Math;' and kind == 3:
+            m = {'sqrt(D)D': f'res.j = WD(sqrt(RD({a[0] if a else 0})));' if a else None,
+                 'floor(D)D': f'res.j = WD(floor(RD({a[0]})));' if a else None,
+                 'ceil(D)D': f'res.j = WD(ceil(RD({a[0]})));' if a else None,
+                 'abs(I)I': f'{{ int32_t x = RI({a[0]}); res.j = WI(x < 0 ? (int32_t)(0u - (uint32_t)x) : x); }}' if a else None,
+                 'abs(J)J': f'{{ int64_t x = RJ({a[0]}); res.j = WJ(x < 0 ? (int64_t)(0ull - (uint64_t)x) : x); }}' if a else None,
+                 'min(II)I': f'res.j = WI(RI({a[0]}) < RI({a[1]}) ? RI({a[0]}) : RI({a[1]}));' if len(a) == 2 else None,
+                 'max(II)I': f'res.j = WI(RI({a[0]}) > RI({a[1]}) ? RI({a[0]}) : RI({a[1]}));' if len(a) == 2 else None,
+                 'min(JJ)J': f'res.j = WJ(RJ({a[0]}) < RJ({a[2]}) ? RJ({a[0]}) : RJ({a[2]}));' if len(a) == 4 else None,
+                 'max(JJ)J': f'res.j = WJ(RJ({a[0]}) > RJ({a[2]}) ? RJ({a[0]}) : RJ({a[2]}));' if len(a) == 4 else None,
+                 }.get(f'{name}({"".join(ps)}){ret}')
+            return m
+        return None
 
     def switch_cases(self, pc, u):
         ins = self.m.insns
@@ -400,24 +441,31 @@ class Gen:
         if op in (0x1a, 0x1b):
             idx = u[1] if op == 0x1a else u[1] | u[2] << 16
             e(f'{v(AA)} = WL(A->const_string(m, {idx}u));'); return
-        if op == 0x1c: e(f'{v(AA)} = WL(A->const_class(m, {u[1]}u));'); return
-        if op == 0x1d: e(f'if (!A->monitor_enter(RL({v(AA)}))) {F}'); return
-        if op == 0x1e: e(f'if (!A->monitor_exit(RL({v(AA)}))) {F}'); return
-        if op == 0x1f: e(f'if ({v(AA)} && !A->check_cast(m, RL({v(AA)}), {u[1]}u)) {F}'); return
+        if op == 0x1c: e(f'{self.at(pc)}{v(AA)} = WL(A->const_class(m, {u[1]}u));'); return
+        if op == 0x1d: e(f'{{ {self.at(pc)}if (!A->monitor_enter(RL({v(AA)}))) {F} }}'); return
+        if op == 0x1e: e(f'{{ {self.at(pc)}if (!A->monitor_exit(RL({v(AA)}))) {F} }}'); return
+        # the cast's check first; only a failing one says where, and throws
+        if op == 0x1f: e(f'if ({v(AA)} && !A->instance_of(m, RL({v(AA)}), {u[1]}u)) {{ {self.at(pc)}A->check_cast(m, RL({v(AA)}), {u[1]}u); {F} }}'); return
+        if op in (0xfe, 0xff, 0xfc, 0xfd): e(f'{self.at(pc)}A->throw_unsupported(m, {op}); {F}'); return
+        if op in (0xfa, 0xfb):
+            if op == 0xfb: regs = [u[2] + i for i in range(AA)]
+            else: regs = [(u[2] >> (4 * i)) & 0xf if i < 4 else A4 for i in range(B4)]
+            ws = ', '.join(v(r) for r in regs) or '0'
+            e(f'{{ uint64_t w[] = {{ {ws} }}; if (!A->invoke_polymorphic(m, {pc}u, {u[1]}u, {u[3]}u, w, {len(regs)}, &res)) {F} }}'); return
         if op == 0x20: e(f'{v(A4)} = WI(A->instance_of(m, RL({v(B4)}), {u[1]}u));'); return
         if op == 0x21:
-            e(f'{{ jobj *a = RL({v(B4)}); if (!a) {{ A->throw_npe("Attempt to get length of null array"); {F} }} '
+            e(f'{{ jobj *a = RL({v(B4)}); if (!a) {{ {self.at(pc)}A->throw_npe("Attempt to get length of null array"); {F} }} '
               f'{v(A4)} = WI((int32_t)(a->kind == TL_K_OBJ_ARRAY ? a->oarr.len : a->arr.len)); }}'); return
-        if op == 0x22: e(f'{{ jobj *o = A->new_instance(m, {u[1]}u); if (!o) {F} {v(AA)} = WL(o); }}'); return
-        if op == 0x23: e(f'{{ jobj *o = A->new_array(m, RI({v(B4)}), {u[1]}u); if (!o) {F} {v(A4)} = WL(o); }}'); return
+        if op == 0x22: e(f'{{ {self.at(pc)}jobj *o = A->new_instance(m, {u[1]}u); if (!o) {F} {v(AA)} = WL(o); }}'); return
+        if op == 0x23: e(f'{{ {self.at(pc)}jobj *o = A->new_array(m, RI({v(B4)}), {u[1]}u); if (!o) {F} {v(A4)} = WL(o); }}'); return
         if op in (0x24, 0x25):
             if op == 0x25: regs = [u[2] + i for i in range(AA)]
             else: regs = [(u[2] >> (4 * i)) & 0xf if i < 4 else A4 for i in range(B4)]
             ws = ', '.join(v(r) for r in regs) or '0'
             e(f'{{ uint64_t w[] = {{ {ws} }}; res.l = A->filled_new_array(m, {u[1]}u, w, {len(regs)}); }}'); return
         if op == 0x26:
-            e(f'if (!A->fill_array_data(m, RL({v(AA)}), {pc + s32(u[1] | u[2] << 16)}u)) {F}'); return
-        if op == 0x27: e(f'A->throw_obj(RL({v(AA)})); {F}'); return
+            e(f'{self.at(pc)}if (!A->fill_array_data(m, RL({v(AA)}), {pc + s32(u[1] | u[2] << 16)}u)) {F}'); return
+        if op == 0x27: e(f'{self.at(pc)}A->throw_obj(RL({v(AA)})); {F}'); return
         if op in (0x28, 0x29, 0x2a):
             off = (AA - 0x100 if AA & 0x80 else AA) if op == 0x28 else s16(u[1]) if op == 0x29 else s32(u[1] | u[2] << 16)
             e(f'goto L{pc + off};'); return
@@ -449,10 +497,10 @@ class Gen:
             k = op - 7 if put else op
             arr, idx, val = v(u[1] & 0xff), v(u[1] >> 8), v(AA)
             check = (f'jobj *a = RL({arr}); int32_t i = RI({idx}); '
-                     f'if (!a || (uint32_t)i >= (a->kind == TL_K_OBJ_ARRAY ? a->oarr.len : a->arr.len)) {{ A->throw_index(a, i); {F} }}')
+                     f'if (!a || (uint32_t)i >= (a->kind == TL_K_OBJ_ARRAY ? a->oarr.len : a->arr.len)) {{ {self.at(pc)}A->throw_index(a, i); {F} }}')
             ct = {0x44: 'int32_t', 0x45: 'int64_t', 0x47: 'uint8_t', 0x48: 'int8_t', 0x49: 'uint16_t', 0x4a: 'int16_t'}
             if k == 0x46:
-                if put: e(f'{{ {check} if (!{val}) a->oarr.v[i] = NULL; else if (!A->aput_object(a, i, RL({val}))) {F} }}')
+                if put: e(f'{{ {check} if (!{val}) a->oarr.v[i] = NULL; else if (!A->aput_object(a, i, RL({val}))) {{ {self.at(pc)}{F} }} }}')
                 else: e(f'{{ {check} {val} = WL(a->oarr.v[i]); }}')
                 return
             t = ct[k]
@@ -470,7 +518,7 @@ class Gen:
             e(f'{{ static dvmc_field fc; jobj *o = RL({o}); jvalue *s = o && fresh(&fc) ? slot_of(o, fc.slot) : NULL;')
             if put: e(f'  if (s) {{ {slot_write(t, "s", r)} }}')
             else: e(f'  if (s) {r} = {slot_read(t, "s")};')
-            e(f'  else {{ uint64_t x = {r}; if (!A->field(m, {u[1]}u, false, {"true" if put else "false"}, o, &x, &fc)) {F} {"" if put else r + " = x;"} }} }}')
+            e(f'  else {{ uint64_t x = {r}; {self.at(pc)}if (!A->field(m, {u[1]}u, false, {"true" if put else "false"}, o, &x, &fc)) {F} {"" if put else r + " = x;"} }} }}')
             return
         if 0x60 <= op <= 0x6d:
             put = op >= 0x67
@@ -478,7 +526,7 @@ class Gen:
             r = v(AA)
             e(f'{{ static dvmc_field fc; if (fresh(&fc)) {{ jvalue *s = fc.place; ' +
               (slot_write(t, 's', r) if put else f'{r} = {slot_read(t, "s")};') + ' }')
-            e(f'  else {{ uint64_t x = {r}; if (!A->field(m, {u[1]}u, true, {"true" if put else "false"}, NULL, &x, &fc)) {F} {"" if put else r + " = x;"} }} }}')
+            e(f'  else {{ uint64_t x = {r}; {self.at(pc)}if (!A->field(m, {u[1]}u, true, {"true" if put else "false"}, NULL, &x, &fc)) {F} {"" if put else r + " = x;"} }} }}')
             return
         if 0x6e <= op <= 0x72 or 0x74 <= op <= 0x78:
             rng = op >= 0x74
@@ -497,7 +545,22 @@ class Gen:
                 if kind in (0, 4):
                     hit += f' && RL(w[0]) && RL(w[0])->kind != TL_K_CLASS && (const void *)RL(w[0])->cls == t->rcls'
                 e(f'  const dvmc_target *t = __atomic_load_n(&cs.t, __ATOMIC_ACQUIRE);')
-                e(f'  if ({hit}) {{ if (!A->call_words(t->m, {pc}u, {wp}, {n}, &res)) {F} }}')
+                fast = self.fast_path(cls, name, d.method_ref(u[1])[2], kind, regs, pc, F)
+                callee = self.module.get(u[1]) if kind in (0, 2, 3) else None
+                if fast:
+                    e(f'  if ({hit}) {{ {fast} }}')
+                elif callee and callee.ins == n:
+                    # a method this dylib compiles: a plain C call (inlined when small), its frame built here
+                    first = callee.regs - callee.ins
+                    fr = ' '.join(f'f[{first + i}] = w[{i}];' for i in range(n))
+                    e(f'  if ({hit} && t->fn == M{u[1]}) {{ uint64_t f[{max(callee.regs, 1)}] = {{ 0 }}; {fr} res.j = 0;')
+                    if callee.leaf:
+                        e(f'    if (!M{u[1]}(t->m, f, &res)) {F} }}')
+                    else:
+                        e(f'    if (!A->enter(t->m, {pc}u)) {F} bool ok = M{u[1]}(t->m, f, &res); A->leave(); if (!ok) {F} }}')
+                    e(f'  else if ({hit}) {{ if (!A->call_words(t->m, {pc}u, {wp}, {n}, &res)) {F} }}')
+                else:
+                    e(f'  if ({hit}) {{ if (!A->call_words(t->m, {pc}u, {wp}, {n}, &res)) {F} }}')
                 e(f'  else if (!A->invoke(m, {pc}u, {kind}, {u[1]}u, {wp}, {n}, &res, &so, &sn, &cs)) {F}')
             else:
                 e(f'  if (!A->invoke(m, {pc}u, {kind}, {u[1]}u, {wp}, {n}, &res, &so, &sn, NULL)) {F}')
@@ -521,7 +584,7 @@ class Gen:
             x, z = binop(sym, kind, s1, s2)
             if z:
                 zc = f'RI({s2}) == 0' if kind == 'I' else f'RJ({s2}) == 0'
-                e(f'if ({zc}) {{ A->throw_div_zero(); {F} }}')
+                e(f'if ({zc}) {{ {self.at(pc)}A->throw_div_zero(); {F} }}')
             e(f'{dst} = {x};'); return
         if 0xd0 <= op <= 0xe2:
             if op <= 0xd7: dst, src, lit, k = v(A4), v(B4), s16(u[1]), op - 0xd0
@@ -533,7 +596,7 @@ class Gen:
                  5: f'WI({a} & {L})', 6: f'WI({a} | {L})', 7: f'WI({a} ^ {L})', 8: f'WI((int32_t)((uint32_t){a} << ({L} & 31)))',
                  9: f'WI({a} >> ({L} & 31))', 10: f'WI((int32_t)((uint32_t){a} >> ({L} & 31)))'}[k]
             if k in (3, 4) and lit == 0:
-                e(f'A->throw_div_zero(); {F}'); return
+                e(f'{self.at(pc)}A->throw_div_zero(); {F}'); return
             e(f'{dst} = {x};'); return
         raise Unsupported(f'opcode {op:#x}')
 
@@ -596,13 +659,22 @@ def main():
             fn = os.path.join(d, f'dexc-{len(files):03d}.c')
             with open(fn, 'w', encoding='utf-8') as f:
                 f.write(PRELUDE)
+                f.write(''.join(f'bool M{i}(struct dvm_method *, uint64_t *, jvalue *) __attribute__((visibility("hidden")));\n' for i in sorted(module)))
                 f.write('\n'.join(cur))
             files.append(fn); cur.clear()
-        for _, idx, flags, code in sorted(chosen, key=lambda c: c[1]):
-            m = Method(dex, idx, flags, code)
+        methods = {idx: Method(dex, idx, flags, code) for _, idx, flags, code in chosen}
+        module = {}
+        for idx, m in methods.items():
+            try:
+                Gen(m).gen(f'M{idx}')
+                module[idx] = Callee(m)
+            except Unsupported:
+                pass
+        for idx in sorted(methods):
+            m = methods[idx]
             cls, name, (ps, ret) = dex.method_ref(idx)
             try:
-                body = Gen(m).gen(f'M{idx}')
+                body = Gen(m, module).gen(f'M{idx}')
             except Unsupported as x:
                 skipped[str(x).split(' past')[0]] = skipped.get(str(x).split(' past')[0], 0) + 1
                 continue
