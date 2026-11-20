@@ -264,8 +264,21 @@ static void sort_own(range *tmp, size_t *counts)
     if (src != v) memcpy(v, src, n * sizeof(range));
 }
 
+/* from the objects in k's work list, everything they reach (each object is traced by the one thread whose list it went into) */
+static void trace_in(marker *k)
+{
+    while (k->nwork) {
+        jobj *o = (jobj *)g_tab[k->work[--k->nwork]];
+        if (o->fields) scan_words_in(k, (uintptr_t)o->fields, (uintptr_t)(o->fields + o->nfields));
+        if (o->kind == TL_K_OBJ_ARRAY && o->oarr.v) scan_words_in(k, (uintptr_t)o->oarr.v, (uintptr_t)(o->oarr.v + o->oarr.len));
+        consider_in(k, (uintptr_t)o->native);
+    }
+}
+static void trace_parallel(void);
+
 static void trace(void)
 {
+    trace_parallel();
     for (;;) {
         while (M0.nwork) {
             jobj *o = (jobj *)g_tab[M0.work[--M0.nwork]];
@@ -311,7 +324,7 @@ static struct {
     unsigned round, finished;
     int job;                                        /* what a round is: JOB_SCAN, or a pass of the tables (JOB_COUNT, JOB_FILL) */
 } W = { .mu = PTHREAD_MUTEX_INITIALIZER, .go = PTHREAD_COND_INITIALIZER, .done = PTHREAD_COND_INITIALIZER };
-enum { JOB_SCAN, JOB_COUNT, JOB_FILL };
+enum { JOB_SCAN, JOB_COUNT, JOB_FILL, JOB_TRACE };
 static void table_part(int part, int pass);
 
 static void *worker(void *arg)
@@ -323,7 +336,9 @@ static void *worker(void *arg)
         while (W.round == seen) pthread_cond_wait(&W.go, &W.mu);
         seen = W.round;
         pthread_mutex_unlock(&W.mu);
-        if (W.job == JOB_SCAN) scan_runs(&W.m[me]); else table_part(me + 1, W.job);
+        if (W.job == JOB_SCAN) scan_runs(&W.m[me]);
+        else if (W.job == JOB_TRACE) trace_in(&W.m[me]);
+        else table_part(me + 1, W.job);
         pthread_mutex_lock(&W.mu);
         W.finished++;
         pthread_cond_signal(&W.done);
@@ -367,10 +382,25 @@ static void scan_memory(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_
     pthread_mutex_lock(&W.mu);
     while (W.finished < (unsigned)W.n) pthread_cond_wait(&W.done, &W.mu);
     pthread_mutex_unlock(&W.mu);
-    /* what the workers marked, into this thread's work list for the trace */
+    /* what each thread marked stays in its work list: the trace starts from there, on every thread (trace_parallel) */
+}
+
+/* the trace, by every collector thread at once, each from the roots it found; what is left (a list that was full) after, here */
+static void trace_parallel(void)
+{
+    if (W.n) {
+        pthread_mutex_lock(&W.mu);
+        W.finished = 0; W.job = JOB_TRACE; W.round++;
+        pthread_cond_broadcast(&W.go);
+        pthread_mutex_unlock(&W.mu);
+        trace_in(&M0);
+        pthread_mutex_lock(&W.mu);
+        while (W.finished < (unsigned)W.n) pthread_cond_wait(&W.done, &W.mu);
+        pthread_mutex_unlock(&W.mu);
+    }
     for (int i = 0; i < W.n; i++) {
         marker *k = &W.m[i];
-        for (size_t j = 0; j < k->nwork; j++) {
+        for (size_t j = 0; j < k->nwork; j++) {                  /* none, unless a worker stopped early */
             if (M0.nwork < M0.capwork) M0.work[M0.nwork++] = k->work[j];
             else S.mark[k->work[j]] = 2;
         }
