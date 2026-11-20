@@ -18,6 +18,7 @@
 
 #include <mach/mach.h>
 #include <mach-o/dyld.h>
+#include <malloc/malloc.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -353,12 +354,15 @@ static bool is_worker(thread_t t) { for (int i = 0; i < W.n; i++) if (W.port[i] 
 
 /* Every writable, resident (or paged-out) page of the process, less the collector's own memory, device memory and the shared cache:
  * listed as runs of pages, then scanned by the workers and this thread. */
-static void list_runs(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_t vecbytes);
+static void list_runs(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_t vecbytes, bool skip_malloc);
+static bool malloc_runs(void);
 static void scan_memory(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_t vecbytes)
 {
     R.nruns = 0; R.next = 0; R.overflow = false;
     memset(R.tag_bytes, 0, sizeof(R.tag_bytes));
-    list_runs(cache_lo, cache_hi, vec, vecbytes);
+    /* the malloc heap by its blocks in use, where every zone can list them; else page by page, as the rest */
+    bool by_block = malloc_runs();
+    list_runs(cache_lo, cache_hi, vec, vecbytes, by_block);
     pthread_mutex_lock(&W.mu);
     W.finished = 0; W.job = JOB_SCAN; W.round++;
     pthread_cond_broadcast(&W.go);
@@ -389,7 +393,76 @@ static void add_run(uintptr_t lo, uintptr_t hi)
     }
 }
 
-static void list_runs(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_t vecbytes)
+/* ---- the malloc heap, by block: its pages hold the blocks freed since they were last used (a collection's garbage among them),
+ * which scanned page by page were most of the roots (PrimeTV: 300-500 MB) and kept dead objects alive through stale pointers. The
+ * zones are locked before the world stops -- as fork() does, so no stopped thread holds one -- and list their blocks in use. */
+#define MAX_ZONES 64
+static struct { malloc_zone_t *z[MAX_ZONES]; unsigned n; bool locked; int on; uintptr_t lo, hi; size_t in_use; } Z = { .on = -1 };
+
+static bool malloc_tag(unsigned t)
+{
+    switch (t) {
+    case VM_MEMORY_MALLOC: case VM_MEMORY_MALLOC_SMALL: case VM_MEMORY_MALLOC_LARGE: case VM_MEMORY_MALLOC_HUGE:
+    case VM_MEMORY_MALLOC_TINY: case VM_MEMORY_MALLOC_LARGE_REUSABLE: case VM_MEMORY_MALLOC_LARGE_REUSED: case VM_MEMORY_MALLOC_NANO:
+#ifdef VM_MEMORY_MALLOC_MEDIUM
+    case VM_MEMORY_MALLOC_MEDIUM:
+#endif
+        return true;
+    default: return false;
+    }
+}
+
+/* before the world stops: every zone that can list its blocks, locked (TL_GC_MALLOC_BLOCKS=0: the heap scanned by pages) */
+static void zones_lock(void)
+{
+    Z.n = 0; Z.locked = false;
+    if (Z.on < 0) { const char *e = getenv("TL_GC_MALLOC_BLOCKS"); Z.on = !(e && !strcmp(e, "0")); }
+    if (!Z.on) return;
+    vm_address_t *addrs = NULL; unsigned n = 0;
+    if (malloc_get_all_zones(mach_task_self(), NULL, &addrs, &n) != KERN_SUCCESS || !addrs || !n || n > MAX_ZONES) return;
+    for (unsigned i = 0; i < n; i++) {
+        malloc_zone_t *z = (malloc_zone_t *)addrs[i];
+        if (!z || !z->introspect || !z->introspect->enumerator || !z->introspect->force_lock || !z->introspect->force_unlock) return;
+        Z.z[Z.n++] = z;
+    }
+    for (unsigned i = 0; i < Z.n; i++) Z.z[i]->introspect->force_lock(Z.z[i]);
+    Z.locked = true;
+}
+static void zones_unlock(void)
+{
+    if (!Z.locked) return;
+    for (unsigned i = Z.n; i-- > 0; ) Z.z[i]->introspect->force_unlock(Z.z[i]);
+    Z.locked = false;
+}
+static kern_return_t zone_read(task_t t, vm_address_t a, vm_size_t size, void **out) { (void)t; (void)size; *out = (void *)a; return KERN_SUCCESS; }
+/* blocks next to each other become one run (a run is at most RUN_MAX_BYTES, as add_run cuts them) */
+static void zone_blocks(task_t t, void *ctx, unsigned type, vm_range_t *r, unsigned n)
+{
+    (void)t; (void)ctx; (void)type;
+    for (unsigned i = 0; i < n; i++) {
+        uintptr_t lo = (uintptr_t)r[i].address, hi = lo + (uintptr_t)r[i].size;
+        Z.in_use += r[i].size;
+        if (lo == Z.hi && hi - Z.lo <= RUN_MAX_BYTES) { Z.hi = hi; continue; }
+        if (Z.hi > Z.lo) add_run(Z.lo, Z.hi);
+        Z.lo = lo; Z.hi = hi;
+    }
+}
+/* the runs of the blocks in use; false (and nothing listed) when a zone cannot say, and its pages are scanned instead */
+static bool malloc_runs(void)
+{
+    Z.in_use = 0;
+    if (!Z.locked) return false;
+    size_t mark = R.nruns;
+    for (unsigned i = 0; i < Z.n; i++) {
+        Z.lo = Z.hi = 0;
+        kern_return_t kr = Z.z[i]->introspect->enumerator(mach_task_self(), NULL, MALLOC_PTR_IN_USE_RANGE_TYPE, (vm_address_t)Z.z[i], zone_read, zone_blocks);
+        if (Z.hi > Z.lo) add_run(Z.lo, Z.hi);
+        if (kr != KERN_SUCCESS) { R.nruns = mark; Z.in_use = 0; return false; }
+    }
+    return true;
+}
+
+static void list_runs(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_t vecbytes, bool skip_malloc)
 {
     vm_address_t addr = 0;
     natural_t depth = 0;
@@ -402,6 +475,7 @@ static void list_runs(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_t 
         addr += size;
         if ((info.protection & (VM_PROT_READ | VM_PROT_WRITE)) != (VM_PROT_READ | VM_PROT_WRITE)) continue;
         if (info.user_tag == GC_TAG || info.user_tag == DATA_TAG) continue;
+        if (skip_malloc && malloc_tag(info.user_tag)) continue;              /* listed by its blocks (malloc_runs) */
         /* shared and aliased memory is scanned too: the loader maps Android libraries' data with vm_remap, and their globals (JNI
            global references, cached strings) are roots. Only device memory is left out. */
         if (info.user_tag == VM_MEMORY_IOKIT || info.user_tag == VM_MEMORY_IOSURFACE || info.user_tag == VM_MEMORY_IOACCELERATOR) continue;
@@ -605,6 +679,7 @@ static void collect(void)
     size_t before = g_count, freed = 0, freed_bytes = 0;
     double t_stop = 0, t_mark = 0, t_tables = 0, t_roots = 0;
     if (ok) {
+        zones_lock();                                            /* before any thread stops: none holds a zone's lock then */
         /* stop the world: every thread but this one, again until no new one has started meanwhile */
         thread_t self = mach_thread_self();
         S.olo = UINTPTR_MAX; S.ohi = 0;
@@ -639,6 +714,7 @@ static void collect(void)
         }
         __builtin_unwind_init();                                 /* this thread's callee-saved registers, onto its stack */
         scan_memory(cache_lo, cache_hi, vec, vecbytes);
+        zones_unlock();
         t_roots = now_ms();
         trace();
         t_mark = now_ms();
@@ -689,7 +765,8 @@ static void collect(void)
             for (int g = 0; g < 256; g++)
                 if (R.tag_bytes[g] > used[k] && g != tags[0] && g != tags[1]) { used[k] = R.tag_bytes[g]; tags[k] = g; }
         for (int k = 0, o = 0; k < 3 && tags[k] >= 0; k++) o += snprintf(top + o, sizeof(top) - o, "%stag %d %zu MiB", k ? ", " : "", tags[k], used[k] >> 20);
-        tl_log_line("gc: roots by VM tag: %s", top);
+        if (Z.in_use) tl_log_line("gc: roots by VM tag: %s; the malloc heap by its blocks in use, %zu MiB", top, Z.in_use >> 20);
+        else tl_log_line("gc: roots by VM tag: %s", top);
     }
     tl_log_line("gc: %zu threads stopped; %zu objects, %zu live, %zu %s (%zu MiB), %zu MiB of roots scanned by %d threads; "
                 "paused %.0f ms (tables %.0f, roots %.0f, trace %.0f), total %.0f ms",
