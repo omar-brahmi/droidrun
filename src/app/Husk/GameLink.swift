@@ -47,14 +47,14 @@ import UIKit
     static func runURL(for app: TLApp) -> URL { URL(string: "droidrun://run/\(app.packageName ?? app.id)")! }
 }
 
-// ---- a Home Screen icon for an Android app: a Shortcuts shortcut that opens droidrun://run/<package>
+// ---- a Home Screen icon for an Android app: a Shortcuts shortcut that runs DroidRun's own action (never a link: a link from Shortcuts
+// or a Web Clip can go through the default browser)
 
 /// How to put an app on the Home Screen: iOS gives an icon of its own only to an installed iOS app, so the icon is a shortcut that
 /// opens the app in DroidRun. The link and the app's picture are made ready here; Shortcuts does the rest.
 struct HomeScreenIconSheet: View {
     let app: TLApp
     @Environment(\.dismiss) private var dismiss
-    @State private var copied = false
     @State private var iconSaved: String?
 
     private var icon: UIImage? { app.iconPath.flatMap { UIImage(contentsOfFile: $0) } }
@@ -67,17 +67,10 @@ struct HomeScreenIconSheet: View {
                         if let icon {
                             Image(uiImage: icon).resizable().frame(width: 56, height: 56).clipShape(RoundedRectangle(cornerRadius: 13))
                         }
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(app.label).font(.headline)
-                            Text(GameLink.runURL(for: app).absoluteString).font(.footnote.monospaced()).foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                        }
+                        Text(app.label).font(.headline)
                     }
                 }
                 Section {
-                    Button { UIPasteboard.general.string = GameLink.runURL(for: app).absoluteString; copied = true } label: {
-                        Label(copied ? "Link Copied" : "Copy Link", systemImage: copied ? "checkmark" : "link")
-                    }
                     if let icon {
                         Button { saveIcon(icon) } label: {
                             Label(iconSaved ?? "Save Icon to Photos", systemImage: iconSaved == nil ? "photo" : "checkmark")
@@ -87,11 +80,12 @@ struct HomeScreenIconSheet: View {
                         Label("Open Shortcuts", systemImage: "square.on.square")
                     }
                 } footer: {
-                    Text("Tapping the icon opens \(app.label) in DroidRun. Only one app runs per session: if another is open, DroidRun offers to close and start this one.")
+                    Text("The icon runs DroidRun's own action, which opens \(app.label) in DroidRun directly: no browser, no link. "
+                       + "Only one app runs per session: if another is open, DroidRun offers to close and start this one.")
                 }
                 Section("In Shortcuts") {
                     step(1, "Tap + for a new shortcut, then Add Action.")
-                    step(2, "Search \"Open \(app.label) in DroidRun\" (DroidRun's own action), or \"Open URLs\" and paste the link.")
+                    step(2, "Search \"DroidRun\" and pick \"Open Android App in DroidRun\". Tap App and choose \(app.label).")
                     step(3, "Tap the shortcut's name at the top, then Add to Home Screen.")
                     step(4, "Tap the icon, Choose Photo, and pick the icon you saved. Name it \(app.label), then Add.")
                 }

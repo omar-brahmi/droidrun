@@ -142,6 +142,7 @@ struct TLAppSettingsView: View {
     @State private var name: String
     @State private var dataSize: String = "…"
     @State private var confirmReset = false
+    @State private var homeIcon = false
     @FocusState private var nameFocused: Bool
 
     init(app: TLApp) {
@@ -249,14 +250,16 @@ struct TLAppSettingsView: View {
             }
 
             Section {
-                Button { AppClip.generate(for: app) } label: {
-                    Label("Generate App Clip", systemImage: "apps.iphone.badge.plus")
+                // A Shortcuts shortcut running DroidRun's own action: a Web Clip (the App Clip profile this made before) opens its link
+                // through the default browser, so with Chrome as the default, Chrome opened instead of the game
+                Button { homeIcon = true } label: {
+                    Label("Add to Home Screen", systemImage: "plus.app")
                 }
+                .sheet(isPresented: $homeIcon) { HomeScreenIconSheet(app: app) }
             } header: {
                 Text("Home Screen")
             } footer: {
-                Text("Puts \(app.label) on your Home Screen with its own icon. Tapping it opens DroidRun straight into the game. DroidRun "
-                   + "downloads a profile: open Settings, tap Profile Downloaded, then Install.")
+                Text("Puts \(app.label) on your Home Screen with its own icon, made in Shortcuts. Tapping it opens DroidRun straight into the game.")
             }
 
             Section {
