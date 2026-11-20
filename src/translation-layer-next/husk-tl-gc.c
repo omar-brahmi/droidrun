@@ -27,6 +27,8 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <time.h>
+#include <setjmp.h>
+#include <signal.h>
 #include <unistd.h>
 
 void tl_log_line(const char *fmt, ...);
@@ -194,7 +196,7 @@ static inline size_t okey_find(uintptr_t p)
 
 /* Roots are found by several threads at once (scan_parallel); each keeps the objects it marks in a work list of its own, and the
  * marks are taken with an atomic exchange, so an object goes into exactly one list. */
-typedef struct { uint32_t *work; size_t nwork, capwork, marked, words; } marker;
+typedef struct { uint32_t *work; size_t nwork, capwork, marked, words, unreadable; } marker;
 
 static inline void mark_slot_in(marker *k, size_t slot)
 {
@@ -305,12 +307,59 @@ static struct {
     size_t tag_bytes[256];                          /* what the roots were, by VM tag (for the log: what to leave out next) */
 } R;
 
+/* ---- a page that faults when read (memory the process listed as readable and writable, then could not read: seen on an iPhone in
+ * Majed Sport, a whole region at once) is left out of the roots: the scan goes on after it, rather than the app ending. Nothing the
+ * app can read is there either. */
+static __thread sigjmp_buf *t_scan_jump;
+static __thread uintptr_t t_scan_fault;
+static struct sigaction g_prev_segv, g_prev_bus;
+static void scan_fault(int sig, siginfo_t *info, void *uc)
+{
+    sigjmp_buf *j = t_scan_jump;
+    if (j) { t_scan_jump = NULL; t_scan_fault = (uintptr_t)(info ? info->si_addr : NULL); siglongjmp(*j, 1); }
+    struct sigaction *prev = sig == SIGBUS ? &g_prev_bus : &g_prev_segv;
+    if ((prev->sa_flags & SA_SIGINFO) && prev->sa_sigaction) prev->sa_sigaction(sig, info, uc);
+    else if (prev->sa_handler != SIG_DFL && prev->sa_handler != SIG_IGN && prev->sa_handler) prev->sa_handler(sig);
+    else signal(sig, SIG_DFL);                                  /* nothing else wants it: it faults again and ends */
+}
+/* on top of whatever handler is there (the loader's and the crash reporter's, which it hands the other faults to): again at each
+ * collection, since a library may have put its own on top meanwhile */
+static void scan_fault_install(void)
+{
+    struct sigaction cur, sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = scan_fault;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER;
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(SIGSEGV, NULL, &cur) == 0 && cur.sa_sigaction != scan_fault) sigaction(SIGSEGV, &sa, &g_prev_segv);
+    if (sigaction(SIGBUS, NULL, &cur) == 0 && cur.sa_sigaction != scan_fault) sigaction(SIGBUS, &sa, &g_prev_bus);
+}
+static void scan_range_guarded(marker *k, uintptr_t lo, uintptr_t hi)
+{
+    const uintptr_t page = (uintptr_t)vm_page_size;
+    volatile uintptr_t p = lo;
+    while (p < hi) {
+        sigjmp_buf jb;
+        if (sigsetjmp(jb, 1) == 0) {
+            t_scan_jump = &jb;
+            scan_range_in(k, p, hi);
+            t_scan_jump = NULL;
+            return;
+        }
+        /* faulted: past the page that did, or past the whole range when the address is not in it */
+        uintptr_t f = t_scan_fault;
+        uintptr_t next = f >= p && f < hi ? (f & ~(page - 1)) + page : hi;
+        k->unreadable += next - p < page ? next - p : page;
+        p = next;
+    }
+}
+
 static void scan_runs(marker *k)
 {
     for (;;) {
         size_t i = __atomic_fetch_add(&R.next, 1, __ATOMIC_RELAXED);
         if (i >= R.nruns) break;
-        scan_range_in(k, R.runs[i].lo, R.runs[i].hi);
+        scan_range_guarded(k, R.runs[i].lo, R.runs[i].hi);
     }
 }
 
@@ -404,7 +453,7 @@ static void trace_parallel(void)
             if (M0.nwork < M0.capwork) M0.work[M0.nwork++] = k->work[j];
             else S.mark[k->work[j]] = 2;
         }
-        M0.marked += k->marked; M0.words += k->words;
+        M0.marked += k->marked; M0.words += k->words; M0.unreadable += k->unreadable; k->unreadable = 0;
         k->nwork = 0; k->marked = 0; k->words = 0;
     }
 }
@@ -415,7 +464,7 @@ static void add_run(uintptr_t lo, uintptr_t hi)
     for (uintptr_t p = lo; p < hi; p += RUN_MAX_BYTES) {
         uintptr_t e = hi - p > RUN_MAX_BYTES ? p + RUN_MAX_BYTES : hi;
         if (R.nruns < R.caprun) { R.runs[R.nruns].lo = p; R.runs[R.nruns].hi = e; R.nruns++; }
-        else { R.overflow = true; scan_range_in(&M0, p, e); }
+        else { R.overflow = true; scan_range_guarded(&M0, p, e); }
     }
 }
 
@@ -637,6 +686,7 @@ static void collect(void)
     /* everything the collection needs, made before the world stops (nothing may allocate while it is stopped) */
     memset(&S, 0, sizeof(S));
     workers_start();
+    scan_fault_install();
     S.capown = g_count * 3 + 1024;
     S.ocap = 1; while (S.ocap < g_count * 4 + 1024) S.ocap <<= 1;
     S.capwork = g_count + 1024;
@@ -738,7 +788,7 @@ static void collect(void)
             }
         }
     }
-    size_t marked = M0.marked, roots_mb = M0.words * 8 >> 20;
+    size_t marked = M0.marked, roots_mb = M0.words * 8 >> 20, unreadable = M0.unreadable;
     /* the next collection after twice the live objects are made; three times when this pause was long (a big heap, slow to stop
        and scan): fewer stops for some more memory, of which the phone has room (PrimeTV paused 400-800 ms every few seconds) */
     if (ok) {
@@ -760,6 +810,7 @@ static void collect(void)
     pthread_mutex_unlock(&g_run);
     double t1 = now_ms();
     if (!ok) { tl_log_line("gc: could not collect (no memory for its tables, or no thread list)"); return; }
+    if (unreadable) tl_log_line("gc: %zu KiB of memory listed as readable faulted when read: left out of the roots", unreadable >> 10);
     {   /* the three largest kinds of root memory */
         char top[160] = ""; size_t used[3] = { 0 }; int tags[3] = { -1, -1, -1 };
         for (int k = 0; k < 3; k++)
