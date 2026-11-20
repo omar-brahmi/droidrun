@@ -566,7 +566,42 @@ static void free_object(jobj *o)
 static pthread_mutex_t g_run = PTHREAD_MUTEX_INITIALIZER;
 
 /* ---- the collector's tables, kept between collections (grown when the heap grows) */
-enum { P_OWN, P_SORT, P_COUNTS, P_OKEY, P_OVAL, P_MARK, P_WORK, P_RUNS, P_STOPPED, P_VEC, P_WORKER, P_COUNT = P_WORKER + GC_WORKERS_MAX };
+enum { P_OWN, P_SORT, P_COUNTS, P_OKEY, P_OVAL, P_MARK, P_WORK, P_RUNS, P_STOPPED, P_VEC, P_SWEEP, P_WORKER, P_COUNT = P_WORKER + GC_WORKERS_MAX };
+
+/* ---- the sweeper: the garbage is freed on a thread of the collector's own, not on the app's thread that started the collection
+ * (a million objects took it 1-3 s more after the pause: a stall, if that thread was the UI's). The next collection waits for it. */
+static struct {
+    pthread_mutex_t mu; pthread_cond_t go;
+    jobj **list; size_t n;
+    bool started;
+} SW = { .mu = PTHREAD_MUTEX_INITIALIZER, .go = PTHREAD_COND_INITIALIZER };
+static atomic_bool g_sweeping;
+static void free_object(jobj *o);
+static void *sweeper(void *arg)
+{
+    (void)arg;
+    pthread_setname_np("husk-gc-sweep");
+    pthread_mutex_lock(&SW.mu);
+    for (;;) {
+        while (!SW.n) pthread_cond_wait(&SW.go, &SW.mu);
+        jobj **list = SW.list; size_t n = SW.n;
+        pthread_mutex_unlock(&SW.mu);
+        for (size_t i = 0; i < n; i++) free_object(list[i]);
+        pthread_mutex_lock(&SW.mu);
+        SW.n = 0;
+        atomic_store(&g_sweeping, false);
+    }
+    return NULL;
+}
+static bool sweeper_start(void)
+{
+    if (SW.started) return true;
+    pthread_t t;
+    if (pthread_create(&t, NULL, sweeper, NULL)) return false;
+    pthread_detach(t);
+    SW.started = true;
+    return true;
+}
 static struct { void *p; size_t cap, used; } g_pool[P_COUNT];
 
 static void *pool(int id, size_t bytes)
@@ -592,6 +627,7 @@ static void prefault(int id)
 
 static void collect(void)
 {
+    if (atomic_load(&g_sweeping)) return;                     /* the last collection's garbage is still being freed */
     if (pthread_mutex_trylock(&g_run) != 0) return;            /* another thread is collecting */
     double t0 = now_ms();
     pthread_mutex_lock(&g_reg);
@@ -625,6 +661,9 @@ static void collect(void)
     R.caprun = 1 << 20; R.runs = pool(P_RUNS, R.caprun * sizeof(run));
     S.capstopped = 8192; S.stopped = pool(P_STOPPED, S.capstopped * sizeof(thread_t));
     char *vec = pool(P_VEC, vecbytes);
+    size_t capsweep = g_count + 1024;
+    jobj **sweep = sweeper_start() ? pool(P_SWEEP, capsweep * sizeof(jobj *)) : NULL;
+    size_t nsweep = 0;
     /* the pages of the tables this collection uses, made resident now */
     for (int k = 0; k < P_COUNT; k++) prefault(k);
     size_t cache_len = 0; uintptr_t cache_lo = 0, cache_hi = 0;
@@ -694,7 +733,8 @@ static void collect(void)
                 if (S.mark[i] != 3) continue;
                 jobj *o = (jobj *)g_tab[i];
                 g_tab[i] = GONE; g_count--;
-                free_object(o);
+                if (sweep && nsweep < capsweep) sweep[nsweep++] = o;     /* out of the registry now; freed by the sweeper */
+                else free_object(o);
             }
         }
     }
@@ -709,6 +749,13 @@ static void collect(void)
         __atomic_store_n(&g_due, d, __ATOMIC_RELAXED);
     }
     /* (the tables stay for the next collection) */
+    if (nsweep) {
+        pthread_mutex_lock(&SW.mu);
+        atomic_store(&g_sweeping, true);
+        SW.list = sweep; SW.n = nsweep;
+        pthread_cond_signal(&SW.go);
+        pthread_mutex_unlock(&SW.mu);
+    }
     pthread_mutex_unlock(&g_reg);
     pthread_mutex_unlock(&g_run);
     double t1 = now_ms();
