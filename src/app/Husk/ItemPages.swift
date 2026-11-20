@@ -143,6 +143,7 @@ struct GamePage: View {
     @State private var preparing: String?
     @State private var prepareFailed: String?
     @State private var confirmQuit = false
+    @State private var homeIcon = false
 
     private var runs: Bool { app.report?.canRun == true }
 
@@ -223,6 +224,9 @@ struct GamePage: View {
                 HuskLink(value: LibraryRoute.gameReport(app.id)) {
                     Label("Technical Details", systemImage: "cpu")
                 }
+                Button { homeIcon = true } label: {
+                    Label("Add to Home Screen", systemImage: "plus.app")
+                }
             }
 
             if !isGeodeLauncher {
@@ -272,6 +276,7 @@ struct GamePage: View {
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(isPresented: $playing, onDismiss: askHowItRan) { TLAttemptView(app: app) }
         .sheet(item: $reporting) { CompatReportSheet(subject: $0) }
+        .sheet(isPresented: $homeIcon) { HomeScreenIconSheet(app: app) }
         .sheet(item: Binding(get: { backupFile.map(IdentifiedURL.init) }, set: { backupFile = $0?.url })) { f in
             ShareSheet(items: [f.url])
         }

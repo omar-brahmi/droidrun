@@ -93,6 +93,8 @@
 		<string>_remotepairing-pairable-host._tcp</string>
 		<string>_remotepairing._tcp</string>
 	</array>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>DroidRun saves an app's icon to Photos, to put on its Home Screen shortcut.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>DroidRun uses the local network to pair with this iPhone for JIT, without a computer.</string>
 	<key>NSSupportsLiveActivities</key>
