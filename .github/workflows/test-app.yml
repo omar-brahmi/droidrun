@@ -76,7 +76,9 @@ jobs:
           # in the app and in the boot class path (libcore, the framework), whose code every app runs
           if [[ " $opts " == *" --profile-run "* ]]; then
             opts="${opts/--profile-run/} --profile out/profile.txt"
-            TL_DEXC=0 TL_DVM_PROFILE="$GITHUB_WORKSPACE/out/profile.txt" TL_CTL=/dev/null \
+            # the app's own taps (packager/ctl/<apk name>.ctl), so more of it runs than its first screen
+            ctl=packager/ctl/$(basename "${{ inputs.apk }}" .apk).ctl; if [ -f "$ctl" ]; then ctl="$GITHUB_WORKSPACE/$ctl"; else ctl=/dev/null; fi
+            TL_DEXC=0 TL_DVM_PROFILE="$GITHUB_WORKSPACE/out/profile.txt" TL_CTL="$ctl" \
               ./javaapp-test "packager/input/${{ inputs.apk }}" ${{ inputs.seconds }} 856 1852 > out/profile-run.log 2>&1 || true
             echo "hot methods: $(wc -l < out/profile.txt)"
             inputs="$inputs $TL_FRAMEWORK $TL_FRAMEWORK_CORE $(ls "$TL_ART"/javalib/*.jar 2>/dev/null)"
@@ -125,7 +127,8 @@ jobs:
             vals out/interpreted.log > out/values-interpreted.txt; vals out/compiled.log > out/values-compiled.txt
             echo "values: $(wc -l < out/values-interpreted.txt) interpreted, $(wc -l < out/values-compiled.txt) compiled"
             if ! diff out/values-interpreted.txt out/values-compiled.txt; then echo "::error::compiled code gave other values"; exit 1; fi
-            [ -s out/values-compiled.txt ] || { echo "::error::no values logged"; exit 1; }
+            # an app that prints no values (the user's apps) is checked by its log instead: crashes, frames, its own errors
+            if [ "$own" = 1 ]; then [ -s out/values-compiled.txt ] || { echo "::error::no values logged"; exit 1; }; fi
           fi
 
       # logs and screenshots of the user's apps: locked (packager/lock.sh)
