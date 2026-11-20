@@ -309,7 +309,10 @@ static struct {
     marker m[GC_WORKERS_MAX];
     pthread_mutex_t mu; pthread_cond_t go, done;
     unsigned round, finished;
+    int job;                                        /* what a round is: JOB_SCAN, or a pass of the tables (JOB_COUNT, JOB_FILL) */
 } W = { .mu = PTHREAD_MUTEX_INITIALIZER, .go = PTHREAD_COND_INITIALIZER, .done = PTHREAD_COND_INITIALIZER };
+enum { JOB_SCAN, JOB_COUNT, JOB_FILL };
+static void table_part(int part, int pass);
 
 static void *worker(void *arg)
 {
@@ -320,7 +323,7 @@ static void *worker(void *arg)
         while (W.round == seen) pthread_cond_wait(&W.go, &W.mu);
         seen = W.round;
         pthread_mutex_unlock(&W.mu);
-        scan_runs(&W.m[me]);
+        if (W.job == JOB_SCAN) scan_runs(&W.m[me]); else table_part(me + 1, W.job);
         pthread_mutex_lock(&W.mu);
         W.finished++;
         pthread_cond_signal(&W.done);
@@ -357,7 +360,7 @@ static void scan_memory(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_
     memset(R.tag_bytes, 0, sizeof(R.tag_bytes));
     list_runs(cache_lo, cache_hi, vec, vecbytes);
     pthread_mutex_lock(&W.mu);
-    W.finished = 0; W.round++;
+    W.finished = 0; W.job = JOB_SCAN; W.round++;
     pthread_cond_broadcast(&W.go);
     pthread_mutex_unlock(&W.mu);
     scan_runs(&M0);
@@ -418,6 +421,98 @@ static void list_runs(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_t 
             c += chunk;
         }
     }
+}
+
+/* ---- the tables (owned blocks, block starts), built by the workers and this thread, each over a slice of the registry: a pass
+ * that counts each slice's blocks, then one that writes them where the counts say. (One thread walked a million objects inside
+ * the pause, 120-200 ms of it on the iPhone.) */
+static struct {
+    size_t count[GC_WORKERS_MAX + 1], base[GC_WORKERS_MAX + 1];
+    uintptr_t lo[GC_WORKERS_MAX + 1], hi[GC_WORKERS_MAX + 1], olo[GC_WORKERS_MAX + 1], ohi[GC_WORKERS_MAX + 1];
+    int parts;
+} T;
+
+static inline void okey_put(uintptr_t start, uint32_t slot, uintptr_t *olo, uintptr_t *ohi)
+{
+    if (start < *olo) *olo = start;
+    if (start > *ohi) *ohi = start;
+    size_t mask = S.ocap - 1, h = hash_ptr(start, mask);
+    for (size_t n = 0; n < S.ocap; n++, h = (h + 1) & mask) {
+        uintptr_t zero = 0;
+        if (__atomic_compare_exchange_n(&S.okey[h], &zero, start, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) { S.oval[h] = slot; return; }
+    }
+}
+
+static void table_part(int part, int pass)
+{
+    size_t a = g_cap * (size_t)part / (size_t)T.parts, b = g_cap * (size_t)(part + 1) / (size_t)T.parts;
+    size_t n = 0, at = T.base[part], end = S.capown;
+    uintptr_t lo = UINTPTR_MAX, hi = 0, olo = UINTPTR_MAX, ohi = 0;
+    #define OWN(start, bytes) do { uintptr_t s_ = (uintptr_t)(start); size_t b_ = (bytes);         if (s_ && b_) { n++; if (pass == JOB_FILL && at < end) { S.own[at].lo = s_; S.own[at].hi = s_ + b_; at++; } } } while (0)
+    #define KEY(start) do { if (pass == JOB_FILL && (start)) okey_put((uintptr_t)(start), (uint32_t)i, &olo, &ohi); } while (0)
+    for (size_t i = a; i < b; i++) {
+        uintptr_t p = g_tab[i];
+        if (p <= GONE) continue;
+        jobj *o = (jobj *)p;
+        if (p < lo) lo = p;
+        if (p > hi) hi = p;
+        OWN(p, sizeof(jobj));
+        if (o->fields) { OWN(o->fields, o->nfields * sizeof(jvalue)); KEY(o->fields); }
+        if (o->monitor) OWN(o->monitor, 64);
+        switch (o->kind) {
+        case TL_K_STRING:
+            if (o->str.u16) { OWN(o->str.u16, (size_t)o->str.len16 * 2); KEY(o->str.u16); }
+            if (o->str.utf8) { OWN(o->str.utf8, pass == JOB_FILL ? strlen(o->str.utf8) + 1 : 1); KEY(o->str.utf8); }
+            break;
+        case TL_K_PRIM_ARRAY:
+            if (o->arr.data) { OWN(o->arr.data, (size_t)o->arr.len * o->arr.esz); KEY(o->arr.data); }
+            break;
+        case TL_K_OBJ_ARRAY:
+            if (o->oarr.v) { OWN(o->oarr.v, (size_t)o->oarr.len * sizeof(jobj *)); KEY(o->oarr.v); }
+            break;
+        default: break;
+        }
+    }
+    #undef OWN
+    #undef KEY
+    if (pass == JOB_COUNT) { T.count[part] = n; T.lo[part] = lo; T.hi[part] = hi; }
+    else { T.count[part] = at - T.base[part]; T.olo[part] = olo; T.ohi[part] = ohi; }
+}
+
+/* one pass over every slice: the workers' slices and this thread's (part 0) */
+static void table_pass(int pass)
+{
+    pthread_mutex_lock(&W.mu);
+    W.finished = 0; W.job = pass; W.round++;
+    pthread_cond_broadcast(&W.go);
+    pthread_mutex_unlock(&W.mu);
+    table_part(0, pass);
+    pthread_mutex_lock(&W.mu);
+    while (W.finished < (unsigned)W.n) pthread_cond_wait(&W.done, &W.mu);
+    pthread_mutex_unlock(&W.mu);
+}
+
+static void build_tables(void)
+{
+    T.parts = W.n + 1;
+    table_pass(JOB_COUNT);
+    size_t at = 0;
+    S.lo = UINTPTR_MAX; S.hi = 0; S.olo = UINTPTR_MAX; S.ohi = 0;
+    for (int p = 0; p < T.parts; p++) {
+        T.base[p] = at; at += T.count[p];
+        if (T.lo[p] < S.lo) S.lo = T.lo[p];
+        if (T.hi[p] > S.hi) S.hi = T.hi[p];
+    }
+    table_pass(JOB_FILL);
+    /* the slices' blocks, end to end (a slice past the room is cut, as one that was full always was: its blocks are scanned) */
+    size_t n = 0;
+    for (int p = 0; p < T.parts; p++) {
+        if (T.base[p] != n && T.count[p]) memmove(&S.own[n], &S.own[T.base[p]], T.count[p] * sizeof(range));
+        n += T.count[p];
+        if (T.olo[p] < S.olo) S.olo = T.olo[p];
+        if (T.ohi[p] > S.ohi) S.ohi = T.ohi[p];
+    }
+    S.nown = n;
 }
 
 static double now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1e3 + t.tv_nsec / 1e6; }
@@ -529,31 +624,8 @@ static void collect(void)
         }
         t_stop = now_ms();
 
-        /* the memory Java objects own, and the lowest and highest object */
-        S.lo = UINTPTR_MAX; S.hi = 0;
-        for (size_t i = 0; i < g_cap; i++) {
-            uintptr_t p = g_tab[i];
-            if (p <= GONE) continue;
-            jobj *o = (jobj *)p;
-            if (p < S.lo) S.lo = p;
-            if (p > S.hi) S.hi = p;
-            own_add(p, sizeof(jobj));
-            if (o->fields) { own_add((uintptr_t)o->fields, o->nfields * sizeof(jvalue)); okey_add((uintptr_t)o->fields, (uint32_t)i); }
-            if (o->monitor) own_add((uintptr_t)o->monitor, 64);
-            switch (o->kind) {
-            case TL_K_STRING:
-                if (o->str.u16) { own_add((uintptr_t)o->str.u16, (size_t)o->str.len16 * 2); okey_add((uintptr_t)o->str.u16, (uint32_t)i); }
-                if (o->str.utf8) { own_add((uintptr_t)o->str.utf8, strlen(o->str.utf8) + 1); okey_add((uintptr_t)o->str.utf8, (uint32_t)i); }
-                break;
-            case TL_K_PRIM_ARRAY:
-                if (o->arr.data) { own_add((uintptr_t)o->arr.data, (size_t)o->arr.len * o->arr.esz); okey_add((uintptr_t)o->arr.data, (uint32_t)i); }
-                break;
-            case TL_K_OBJ_ARRAY:
-                if (o->oarr.v) { own_add((uintptr_t)o->oarr.v, (size_t)o->oarr.len * sizeof(jobj *)); okey_add((uintptr_t)o->oarr.v, (uint32_t)i); }
-                break;
-            default: break;
-            }
-        }
+        /* the memory Java objects own, and the lowest and highest object: the registry walked by all the collector's threads */
+        build_tables();
         sort_own(sort_tmp, sort_counts);
         t_tables = now_ms();
 
