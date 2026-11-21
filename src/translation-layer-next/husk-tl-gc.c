@@ -196,7 +196,7 @@ static inline size_t okey_find(uintptr_t p)
 
 /* Roots are found by several threads at once (scan_parallel); each keeps the objects it marks in a work list of its own, and the
  * marks are taken with an atomic exchange, so an object goes into exactly one list. */
-typedef struct { uint32_t *work; size_t nwork, capwork, marked, words, unreadable; } marker;
+typedef struct { uint32_t *work; size_t nwork, capwork, marked, words, unreadable; uintptr_t first_fault; } marker;
 
 static inline void mark_slot_in(marker *k, size_t slot)
 {
@@ -310,8 +310,10 @@ static struct {
 /* ---- a page that faults when read (memory the process listed as readable and writable, then could not read: seen on an iPhone in
  * Majed Sport, a whole region at once) is left out of the roots: the scan goes on after it, rather than the app ending. Nothing the
  * app can read is there either. */
-static __thread sigjmp_buf *t_scan_jump;
-static __thread uintptr_t t_scan_fault;
+/* volatile, and fenced: the handler reads it, which the compiler does not see -- without them it dropped the store that set it as
+   a dead one (set, then cleared, with nothing reading it between), and a fault in the scan ended the app as before */
+static __thread sigjmp_buf *volatile t_scan_jump;
+static __thread volatile uintptr_t t_scan_fault;
 static struct sigaction g_prev_segv, g_prev_bus;
 static void scan_fault(int sig, siginfo_t *info, void *uc)
 {
@@ -342,12 +344,15 @@ static void scan_range_guarded(marker *k, uintptr_t lo, uintptr_t hi)
         sigjmp_buf jb;
         if (sigsetjmp(jb, 1) == 0) {
             t_scan_jump = &jb;
+            __atomic_signal_fence(__ATOMIC_SEQ_CST);
             scan_range_in(k, p, hi);
+            __atomic_signal_fence(__ATOMIC_SEQ_CST);
             t_scan_jump = NULL;
             return;
         }
         /* faulted: past the page that did, or past the whole range when the address is not in it */
         uintptr_t f = t_scan_fault;
+        if (!k->first_fault) k->first_fault = f ? f : p;
         uintptr_t next = f >= p && f < hi ? (f & ~(page - 1)) + page : hi;
         k->unreadable += next - p < page ? next - p : page;
         p = next;
@@ -423,6 +428,13 @@ static void scan_memory(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_
     R.nruns = 0; R.next = 0; R.overflow = false;
     memset(R.tag_bytes, 0, sizeof(R.tag_bytes));
     list_runs(cache_lo, cache_hi, vec, vecbytes);
+    /* TL_GC_TEST_UNREADABLE=1: a block that cannot be read, among the roots, to see the scan go past it (the Mac harness) */
+    static void *test_block; static int test_on = -1;
+    if (test_on < 0) test_on = getenv("TL_GC_TEST_UNREADABLE") != NULL;
+    if (test_on) {
+        if (!test_block) { test_block = mmap(NULL, 3 << 20, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0); if (test_block == MAP_FAILED) test_block = NULL; }
+        if (test_block) add_run((uintptr_t)test_block, (uintptr_t)test_block + (3 << 20));
+    }
     pthread_mutex_lock(&W.mu);
     W.finished = 0; W.job = JOB_SCAN; W.round++;
     pthread_cond_broadcast(&W.go);
@@ -454,6 +466,8 @@ static void trace_parallel(void)
             else S.mark[k->work[j]] = 2;
         }
         M0.marked += k->marked; M0.words += k->words; M0.unreadable += k->unreadable; k->unreadable = 0;
+        if (!M0.first_fault) M0.first_fault = k->first_fault;
+        k->first_fault = 0;
         k->nwork = 0; k->marked = 0; k->words = 0;
     }
 }
@@ -810,7 +824,16 @@ static void collect(void)
     pthread_mutex_unlock(&g_run);
     double t1 = now_ms();
     if (!ok) { tl_log_line("gc: could not collect (no memory for its tables, or no thread list)"); return; }
-    if (unreadable) tl_log_line("gc: %zu KiB of memory listed as readable faulted when read: left out of the roots", unreadable >> 10);
+    if (unreadable) {
+        /* what it was: the region, its VM tag and protection, for leaving it out by name next time */
+        vm_address_t a = (vm_address_t)M0.first_fault; vm_size_t sz = 0; natural_t depth = 0;
+        vm_region_submap_info_data_64_t info; mach_msg_type_number_t cnt = VM_REGION_SUBMAP_INFO_COUNT_64;
+        bool known = vm_region_recurse_64(mach_task_self(), &a, &sz, &depth, (vm_region_recurse_info_t)&info, &cnt) == KERN_SUCCESS;
+        tl_log_line("gc: %zu KiB of memory listed as readable faulted when read (first at %#lx%s, VM tag %d, protection %d/%d, region "
+                    "%#lx + %lu KiB): left out of the roots", unreadable >> 10, (unsigned long)M0.first_fault, known ? "" : ", region gone",
+                    known ? (int)info.user_tag : -1, known ? info.protection : -1, known ? info.max_protection : -1,
+                    (unsigned long)a, (unsigned long)(sz >> 10));
+    }
     {   /* the three largest kinds of root memory */
         char top[160] = ""; size_t used[3] = { 0 }; int tags[3] = { -1, -1, -1 };
         for (int k = 0; k < 3; k++)
