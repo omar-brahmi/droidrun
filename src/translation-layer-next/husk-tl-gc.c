@@ -423,6 +423,7 @@ static bool is_worker(thread_t t) { for (int i = 0; i < W.n; i++) if (W.port[i] 
 /* Every writable, resident (or paged-out) page of the process, less the collector's own memory, device memory and the shared cache:
  * listed as runs of pages, then scanned by the workers and this thread. */
 static void list_runs(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_t vecbytes);
+static void add_run(uintptr_t lo, uintptr_t hi);
 static void scan_memory(uintptr_t cache_lo, uintptr_t cache_hi, char *vec, size_t vecbytes)
 {
     R.nruns = 0; R.next = 0; R.overflow = false;
